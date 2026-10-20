@@ -1,0 +1,7 @@
+data/
+node_modules/
+.claude/
+logo-educonx-dark.svg
+logo-educonx-light.svg
+logo-educonx-full.png
+PROJECT-PROMPT.md

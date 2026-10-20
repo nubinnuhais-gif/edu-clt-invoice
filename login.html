@@ -1,0 +1,403 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script>try{var t=localStorage.getItem("clt_theme");if(!t)t=matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light";document.documentElement.dataset.theme=t}catch(e){}</script>
+<title>Sign in · Invoices</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root { --bg: #f0f3f8; --panel: #fff; --border: #e5e7eb; --text: #111827; --muted: #6b7280; --accent: #203868; --accent-dark: #172a50; --green: #50a048; --danger: #dc2626; }
+  * { box-sizing: border-box; margin: 0; }
+  html, body { height: 100%; }
+  body {
+    font-family: "Poppins", Arial, sans-serif;
+    background: var(--bg) url(background-light.svg) center / cover no-repeat fixed;
+    color: var(--text); display: grid; place-items: center; padding: 16px;
+    overflow: hidden;
+  }
+
+  /* ---------- Floating particles (hidden, kept for transition) ---------- */
+  .particles { display: none; }
+  .particle {
+    position: absolute; border-radius: 50%; opacity: 0;
+    animation: particleFloat linear infinite;
+  }
+  @keyframes particleFloat {
+    0%   { transform: translateY(100vh) scale(0); opacity: 0; }
+    10%  { opacity: 1; }
+    90%  { opacity: 1; }
+    100% { transform: translateY(-20vh) scale(1); opacity: 0; }
+  }
+
+  /* ---------- Login wrapper (logo + card together) ---------- */
+  .login-wrap {
+    display: flex; flex-direction: column; align-items: center;
+    position: relative; z-index: 2; width: 100%; max-width: 420px;
+  }
+
+  /* ---------- Logo area (above card) ---------- */
+  .logo-area {
+    display: flex; flex-direction: column; align-items: center;
+    margin-bottom: 22px;
+    opacity: 0; animation: logoEntry .4s .05s cubic-bezier(.22,.61,.36,1) forwards;
+  }
+  .logo-mark-wrap {
+    position: relative; width: 120px; height: 120px;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .logo-mark-wrap img { height: 50px; width: auto; object-fit: contain; position: relative; z-index: 2; }
+  .logo-mark-ring {
+    position: absolute; inset: 0; border-radius: 50%;
+    border: 2.5px solid #e5e7eb;
+  }
+  .logo-mark-glow {
+    position: absolute; inset: -16px; border-radius: 50%;
+    background: radial-gradient(circle, rgba(32,56,104,.07) 0%, transparent 70%);
+  }
+  .logo-company {
+    margin-top: 16px; text-align: center;
+    opacity: 0; animation: fadeSlideUp .3s .15s ease forwards;
+  }
+  .logo-company-name {
+    font-size: 15px; font-weight: 700; color: var(--accent); letter-spacing: .02em;
+  }
+  .logo-company-tag {
+    font-size: 10px; font-weight: 600; color: var(--muted); letter-spacing: .12em;
+    text-transform: uppercase; margin-top: 4px;
+  }
+
+  @keyframes logoEntry {
+    from { opacity: 0; transform: translateY(-16px) scale(.94); }
+    to   { opacity: 1; transform: translateY(0) scale(1); }
+  }
+  @keyframes fadeSlideUp {
+    from { opacity: 0; transform: translateY(8px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+
+  /* ---------- Card ---------- */
+  .card {
+    position: relative; z-index: 2; width: 100%; max-width: 420px;
+    background: var(--panel); border: 1px solid var(--border); border-radius: 20px;
+    padding: 32px 28px 34px;
+    box-shadow: 0 8px 40px rgba(32,56,104,.10), 0 1px 3px rgba(0,0,0,.06);
+    opacity: 0; animation: cardEntry .4s .1s cubic-bezier(.22,.61,.36,1) forwards;
+  }
+  @keyframes cardEntry {
+    from { opacity: 0; transform: translateY(30px) scale(.97); }
+    to   { opacity: 1; transform: translateY(0) scale(1); }
+  }
+
+  /* Animated gradient border (top) */
+  .card::before {
+    content: ""; position: absolute; left: 0; right: 0; top: 0; height: 3px; border-radius: 20px 20px 0 0;
+    background: linear-gradient(90deg, var(--accent), #2e6bc4, var(--green), #2e6bc4, var(--accent));
+    background-size: 300% 100%;
+    animation: borderShimmer 4s linear infinite;
+  }
+  @keyframes borderShimmer {
+    0% { background-position: 0% 50%; }
+    100% { background-position: 300% 50%; }
+  }
+
+  /* Shimmer sweep across card */
+  .card::after {
+    content: ""; position: absolute; inset: 0; border-radius: 20px; overflow: hidden;
+    background: linear-gradient(90deg, transparent, rgba(255,255,255,.06), transparent);
+    background-size: 50% 100%; background-repeat: no-repeat;
+    animation: cardShimmer 3s 1s ease-in-out infinite;
+    pointer-events: none;
+  }
+  @keyframes cardShimmer {
+    0%   { background-position: -50% 0; }
+    100% { background-position: 150% 0; }
+  }
+
+  /* ---------- Form elements ---------- */
+  h1 {
+    font-size: 22px; font-weight: 700; text-align: center; letter-spacing: -.01em;
+    margin: 0 0 4px; color: var(--text);
+    opacity: 0; animation: fadeSlideUp .3s .2s ease forwards;
+  }
+  p.sub {
+    text-align: center; color: var(--muted); font-size: 13px; margin: 0 0 24px;
+    opacity: 0; animation: fadeSlideUp .3s .25s ease forwards;
+  }
+  .form-group {
+    margin-bottom: 18px;
+    opacity: 0; animation: fadeSlideUp .3s ease forwards;
+  }
+  .form-group:nth-child(3) { animation-delay: .3s; }
+  .form-group:nth-child(4) { animation-delay: .35s; }
+  label { display: block; font-size: 13px; font-weight: 600; color: #374151; margin: 0 0 6px; }
+  .field { position: relative; }
+  .field .ic { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); width: 16px; height: 16px; color: #9ca3af; pointer-events: none; transition: color .2s; }
+  .field:focus-within .ic { color: var(--accent); }
+  input {
+    width: 100%; font: inherit; font-size: 14px; color: var(--text);
+    height: 44px; padding: 0 14px 0 40px;
+    border: 1.5px solid #e5e7eb; border-radius: 12px; background: #f9fafb;
+    transition: border-color .2s, box-shadow .2s, background .2s;
+  }
+  input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px rgba(32,56,104,.10); background: #fff; }
+  .error { color: var(--danger); font-size: 13px; min-height: 0; margin: -8px 0 12px; }
+  .error:empty { display: none; }
+
+  .btn-submit {
+    width: 100%; font: inherit; font-weight: 700; font-size: 14px; height: 44px;
+    border: 0; border-radius: 12px; cursor: pointer; margin-top: 4px;
+    background: linear-gradient(135deg, var(--accent), #2e6bc4);
+    color: #fff; position: relative; overflow: hidden;
+    box-shadow: 0 4px 14px rgba(32,56,104,.25);
+    transition: transform .15s, box-shadow .15s;
+    opacity: 0; animation: fadeSlideUp .3s .4s ease forwards;
+  }
+  .btn-submit:hover { transform: translateY(-1px); box-shadow: 0 6px 20px rgba(32,56,104,.30); }
+  .btn-submit:active { transform: translateY(0); }
+  .btn-submit:disabled { opacity: .65; cursor: wait; transform: none; }
+  .btn-submit::after {
+    content: ""; position: absolute; top: 0; left: -100%; width: 100%; height: 100%;
+    background: linear-gradient(90deg, transparent, rgba(255,255,255,.15), transparent);
+    animation: btnShimmer 2.5s 1.5s ease-in-out infinite;
+  }
+  @keyframes btnShimmer { 0% { left: -100%; } 100% { left: 100%; } }
+
+  /* Theme toggle */
+  .card button.theme-toggle {
+    position: absolute; top: 24px; right: 20px; z-index: 10; width: 36px; height: 36px; padding: 0; margin: 0;
+    border-radius: 999px; display: grid; place-items: center;
+    background: #f3f4f6; color: #6b7280; box-shadow: none; border: 1px solid #e5e7eb;
+    cursor: pointer; transition: background .2s, color .2s;
+    opacity: 0; animation: fadeSlideUp .3s .3s ease forwards;
+  }
+  .card button.theme-toggle:hover { background: #e5e7eb; color: #111827; }
+  .card button.theme-toggle .ic { width: 16px; height: 16px; }
+
+  .ic { display: inline-block; }
+
+  /* ---------- Logo per theme ---------- */
+  .for-dark { display: none !important; }
+  html[data-theme="dark"] .for-light { display: none !important; }
+  html[data-theme="dark"] .for-dark { display: block !important; }
+
+  /* ---------- Dark mode ---------- */
+  html[data-theme="dark"] body { background: #0b1530 url(background-dark.svg) center / cover no-repeat fixed; color: #e6ecf7; color-scheme: dark; }
+  html[data-theme="dark"] .card {
+    background: linear-gradient(135deg, rgba(24, 40, 78, .75), rgba(10, 20, 44, .60));
+    border-color: rgba(255,255,255,.10);
+    box-shadow: 0 20px 60px rgba(0,0,0,.50), inset 0 1px 0 rgba(255,255,255,.06);
+  }
+  html[data-theme="dark"] .card::after { background: linear-gradient(90deg, transparent, rgba(255,255,255,.03), transparent); }
+  html[data-theme="dark"] h1 { color: #e6ecf7; }
+  html[data-theme="dark"] p.sub { color: #8796b3; }
+  html[data-theme="dark"] label { color: #a9b8d3; }
+  html[data-theme="dark"] input { background: rgba(255,255,255,.06); border-color: rgba(255,255,255,.12); color: #e6ecf7; }
+  html[data-theme="dark"] input::placeholder { color: #6f7f9c; }
+  html[data-theme="dark"] input:focus { background: rgba(255,255,255,.09); border-color: #6b9be6; box-shadow: 0 0 0 3px rgba(107,155,230,.20); }
+  html[data-theme="dark"] input:-webkit-autofill { -webkit-text-fill-color: #e6ecf7; -webkit-box-shadow: 0 0 0 1000px #14254a inset; transition: background-color 9999s; }
+  html[data-theme="dark"] .field .ic { color: #6f7f9c; }
+  html[data-theme="dark"] .field:focus-within .ic { color: #8fb8ff; }
+  html[data-theme="dark"] .btn-submit { background: linear-gradient(135deg, #3060b0, #3f73c4); box-shadow: 0 4px 20px rgba(0,0,0,.45); }
+  html[data-theme="dark"] .btn-submit:hover { box-shadow: 0 6px 28px rgba(0,0,0,.55); }
+  html[data-theme="dark"] .card button.theme-toggle { background: rgba(255,255,255,.07); color: #a9b8d3; border-color: rgba(255,255,255,.12); }
+  html[data-theme="dark"] .card button.theme-toggle:hover { background: rgba(255,255,255,.14); color: #fff; }
+  html[data-theme="dark"] .error { color: #ffb1b1; }
+  html[data-theme="dark"] .logo-mark-ring { border-color: rgba(255,255,255,.10); }
+  html[data-theme="dark"] .logo-mark-glow { background: radial-gradient(circle, rgba(63,115,196,.12) 0%, transparent 70%); }
+  html[data-theme="dark"] .logo-company-name { color: #e6ecf7; }
+  html[data-theme="dark"] .logo-company-tag { color: #8796b3; }
+
+  /* ---------- Loading overlay ---------- */
+  .loading-overlay {
+    position: fixed; inset: 0; z-index: 100;
+    display: none; flex-direction: column; align-items: center; justify-content: center;
+    background: var(--bg) url(background-light.svg) center / cover no-repeat fixed;
+    opacity: 0; transition: opacity .5s ease;
+  }
+  .loading-overlay.show { display: flex; opacity: 1; }
+
+  /* Logo with spinning ring */
+  .load-logo-wrap {
+    position: relative; width: 130px; height: 130px;
+    display: flex; align-items: center; justify-content: center;
+    opacity: 0; animation: loadLogoReveal .7s .1s cubic-bezier(.22,.61,.36,1) forwards;
+  }
+  .load-logo-wrap img { height: 52px; width: auto; max-width: 100px; object-fit: contain; position: relative; z-index: 2; }
+  .load-ring {
+    position: absolute; inset: 0; border-radius: 50%;
+    border: 2.5px solid #e5e7eb;
+  }
+  .load-ring::after {
+    content: ""; position: absolute; inset: -2.5px; border-radius: 50%;
+    border: 2.5px solid transparent;
+    border-top-color: var(--accent); border-right-color: var(--green);
+    animation: loadSpin 1.2s linear infinite;
+  }
+  .load-glow {
+    position: absolute; inset: -20px; border-radius: 50%;
+    background: radial-gradient(circle, rgba(32,56,104,.08) 0%, transparent 70%);
+    animation: loadGlowPulse 2s ease-in-out infinite;
+  }
+
+  /* Company name + tagline */
+  .load-company {
+    margin-top: 28px; text-align: center;
+    opacity: 0; animation: fadeSlideUp .6s .4s ease forwards;
+  }
+  .load-company-name {
+    font-size: 15px; font-weight: 700; color: var(--accent); letter-spacing: .02em;
+  }
+  .load-company-tag {
+    font-size: 10px; font-weight: 600; color: var(--muted); letter-spacing: .12em;
+    text-transform: uppercase; margin-top: 4px;
+  }
+
+  /* Progress bar */
+  .load-progress {
+    margin-top: 32px; width: 180px;
+    opacity: 0; animation: fadeSlideUp .5s .6s ease forwards;
+  }
+  .load-progress-track { height: 3px; background: #e8edf6; border-radius: 3px; overflow: hidden; }
+  .load-progress-bar {
+    height: 100%; width: 0; border-radius: 3px;
+    background: linear-gradient(90deg, var(--accent), var(--green));
+    animation: loadBar 2s .8s cubic-bezier(.4,0,.2,1) forwards;
+  }
+  .load-status {
+    margin-top: 10px; font-size: 11px; color: var(--muted); text-align: center;
+    letter-spacing: .04em;
+    opacity: 0; animation: fadeSlideUp .4s .9s ease forwards;
+  }
+
+  @keyframes loadLogoReveal {
+    from { opacity: 0; transform: scale(.8); }
+    to   { opacity: 1; transform: scale(1); }
+  }
+  @keyframes loadSpin { to { transform: rotate(360deg); } }
+  @keyframes loadGlowPulse {
+    0%, 100% { transform: scale(1); opacity: .6; }
+    50%      { transform: scale(1.08); opacity: 1; }
+  }
+  @keyframes loadBar { 0% { width: 0; } 40% { width: 55%; } 80% { width: 88%; } 100% { width: 100%; } }
+
+  html[data-theme="dark"] .loading-overlay { background: #0b1530 url(background-dark.svg) center / cover no-repeat fixed; }
+  html[data-theme="dark"] .load-ring { border-color: rgba(255,255,255,.08); }
+  html[data-theme="dark"] .load-ring::after { border-top-color: #3f73c4; border-right-color: #50a048; }
+  html[data-theme="dark"] .load-glow { background: radial-gradient(circle, rgba(63,115,196,.12) 0%, transparent 70%); }
+  html[data-theme="dark"] .load-company-name { color: #e6ecf7; }
+  html[data-theme="dark"] .load-company-tag { color: #8796b3; }
+  html[data-theme="dark"] .load-progress-track { background: rgba(255,255,255,.06); }
+  html[data-theme="dark"] .load-status { color: #6f7f9c; }
+</style>
+</head>
+<body>
+
+<!-- Floating particles -->
+<div class="particles" id="particles"></div>
+
+<!-- Loading screen (shown after successful login) -->
+<div class="loading-overlay" id="loadingOverlay">
+  <div class="load-logo-wrap">
+    <div class="load-glow"></div>
+    <div class="load-ring"></div>
+    <img class="for-light" src="logo-mark-transparent.png" alt="CLT">
+    <img class="for-dark" src="logo-mark-dark.png" alt="CLT">
+  </div>
+  <div class="load-company">
+    <div class="load-company-name">Consulting, Learning &amp; Training FZE</div>
+    <div class="load-company-tag">Invoice Management System</div>
+  </div>
+  <div class="load-progress">
+    <div class="load-progress-track"><div class="load-progress-bar"></div></div>
+    <div class="load-status">Loading your workspace…</div>
+  </div>
+</div>
+
+<div class="login-wrap">
+  <!-- Logo above card -->
+  <div class="logo-area">
+    <div class="logo-mark-wrap">
+      <div class="logo-mark-glow"></div>
+      <div class="logo-mark-ring"></div>
+      <img class="for-light" src="logo-mark-transparent.png" alt="CLT">
+      <img class="for-dark" src="logo-mark-dark.png" alt="CLT">
+    </div>
+    <div class="logo-company">
+      <div class="logo-company-name">Consulting, Learning &amp; Training FZE</div>
+      <div class="logo-company-tag">Invoice Management System</div>
+    </div>
+  </div>
+
+  <!-- Login card -->
+  <form class="card" id="form" autocomplete="on">
+  <button type="button" class="theme-toggle"></button>
+  <h1>Welcome back</h1>
+  <p class="sub">Sign in to your account</p>
+  <div class="form-group">
+    <label for="username">Username</label>
+    <div class="field" data-icon="user"><input id="username" name="username" autocomplete="username" placeholder="Enter your username" required autofocus></div>
+  </div>
+  <div class="form-group">
+    <label for="password">Password</label>
+    <div class="field" data-icon="lock"><input id="password" name="password" type="password" autocomplete="current-password" placeholder="Enter your password" required></div>
+  </div>
+  <div class="error" id="error"></div>
+  <button class="btn-submit" id="btn" type="submit">Sign in</button>
+  </form>
+</div>
+
+<script src="common.js"></script>
+<script>
+  // Floating particles
+  (function() {
+    const container = document.getElementById("particles");
+    const colors = ["rgba(32,56,104,.12)", "rgba(80,160,72,.10)", "rgba(46,107,196,.08)"];
+    for (let i = 0; i < 20; i++) {
+      const p = document.createElement("div");
+      p.className = "particle";
+      const size = 4 + Math.random() * 8;
+      p.style.cssText = `width:${size}px;height:${size}px;left:${Math.random()*100}%;background:${colors[i%3]};animation-duration:${8+Math.random()*12}s;animation-delay:${Math.random()*8}s;`;
+      container.appendChild(p);
+    }
+  })();
+
+  const SERVER_HELP = "Can't reach the invoice server. Start it with start.bat, then open http://localhost:8080";
+  if (location.protocol === "file:") document.getElementById("error").textContent = SERVER_HELP;
+  else fetch("/api/me", { credentials: "same-origin" }).then(r => { if (r.ok) location.href = "/admin"; }).catch(() => {});
+
+  document.getElementById("form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const btn = document.getElementById("btn"), err = document.getElementById("error");
+    btn.disabled = true; btn.textContent = "Signing in…"; err.textContent = "";
+    try {
+      const res = await fetch("/api/login", {
+        method: "POST", headers: { "Content-Type": "application/json" }, credentials: "same-origin",
+        body: JSON.stringify({ username: document.getElementById("username").value, password: document.getElementById("password").value })
+      });
+      const data = await res.json().catch(() => null);
+      if (!data) throw new Error(SERVER_HELP);
+      if (!res.ok) throw new Error(data.error || "Sign in failed");
+      const dest = "/admin";
+      const wrap = document.querySelector(".login-wrap");
+      wrap.style.transition = "opacity .25s ease, transform .25s ease";
+      wrap.style.opacity = "0";
+      wrap.style.transform = "scale(.97)";
+      setTimeout(() => {
+        wrap.style.display = "none";
+        const ov = document.getElementById("loadingOverlay");
+        ov.style.display = "flex";
+        requestAnimationFrame(() => ov.style.opacity = "1");
+      }, 250);
+      setTimeout(() => { location.href = dest; }, 1500);
+      return;
+    } catch (ex) {
+      err.textContent = ex instanceof TypeError ? SERVER_HELP : ex.message;
+      document.getElementById("password").select();
+    }
+    btn.disabled = false; btn.textContent = "Sign in";
+  });
+</script>
+</body>
+</html>

@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Report</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root { --navy: #203868; --green: #50a048; --border: #e5e7eb; --muted: #6b7280; --text: #111827; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body { font-family: "Poppins", Arial, sans-serif; background: #eef0f4; color: var(--text); font-size: 12px; }
+  .ic { width: 16px; height: 16px; }
+  .toolbar { position: sticky; top: 0; z-index: 5; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; padding: 10px 16px; background: #fff; border-bottom: 1px solid var(--border); }
+  .toolbar b { margin-right: auto; font-size: 14px; }
+  .toolbar button { font: inherit; font-size: 13px; font-weight: 500; display: inline-flex; gap: 6px; align-items: center; cursor: pointer; border: 1px solid var(--border); background: #fff; color: var(--text); padding: 7px 14px; border-radius: 10px; }
+  .toolbar button.primary { background: var(--navy); border-color: var(--navy); color: #fff; }
+  .sheet { width: 210mm; min-height: 297mm; margin: 18px auto; background: #fff; padding: 14mm 12mm; box-shadow: 0 1px 8px rgba(0,0,0,.12); }
+  .sheet.landscape { width: 297mm; min-height: 210mm; }
+  .head { display: flex; justify-content: space-between; align-items: flex-start; gap: 20px; padding-bottom: 12px; border-bottom: 3px solid var(--navy); position: relative; }
+  .head::after { content: ""; position: absolute; left: 0; bottom: -3px; width: 120px; height: 3px; background: var(--green); }
+  .head img { height: 52px; }
+  .head .addr { color: var(--muted); font-size: 10px; margin-top: 6px; line-height: 1.5; }
+  .head .title { text-align: right; }
+  .head .title h1 { margin: 0; font-size: 22px; font-weight: 600; color: var(--navy); }
+  .head .title div { color: var(--muted); font-size: 11px; margin-top: 2px; }
+  .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 16px 0 6px; }
+  .stats div { border: 1px solid var(--border); border-radius: 10px; padding: 8px 10px; }
+  .stats span { color: var(--muted); font-size: 10px; display: block; }
+  .stats b { font-size: 15px; font-weight: 600; color: var(--navy); }
+  h2 { font-size: 13px; font-weight: 600; color: var(--navy); margin: 18px 0 6px; }
+  table { width: 100%; border-collapse: collapse; font-size: 10.5px; }
+  th { background: var(--navy); color: #fff; font-weight: 500; text-align: left; padding: 6px 7px; }
+  td { padding: 5px 7px; border-bottom: 1px solid #eceef2; vertical-align: top; }
+  tr:nth-child(even) td { background: #f8f9fb; }
+  .r { text-align: right; white-space: nowrap; }
+  tfoot td { font-weight: 600; border-top: 1.5px solid var(--navy); background: #fff !important; }
+  .two { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .muted { color: var(--muted); }
+  .empty { color: var(--muted); padding: 10px 0; }
+  .foot { margin-top: 18px; color: var(--muted); font-size: 9.5px; text-align: center; }
+  .loading { text-align: center; padding: 60px; color: var(--muted); }
+  @media print {
+    @page { size: A4; margin: 10mm; }
+    body { background: #fff; }
+    .toolbar { display: none; }
+    .sheet { box-shadow: none; margin: 0; padding: 0; width: auto; min-height: auto; }
+    th { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    .head::after, tr:nth-child(even) td { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    tr { break-inside: avoid; }
+  }
+</style>
+<style id="pageSize"></style>
+</head>
+<body>
+  <div class="toolbar">
+    <b id="tbTitle">Report</b>
+    <button class="primary" onclick="window.print()" data-icon="printer">Print / Save as PDF</button>
+    <button id="xlsx" data-icon="sheet">Download Excel</button>
+    <button onclick="window.close()">Close</button>
+  </div>
+  <div class="sheet" id="sheet"><div class="loading">Loading report…</div></div>
+
+<script src="common.js"></script>
+<script>
+(async () => {
+  const q = new URLSearchParams(location.search);
+  const type = q.get("type") === "audit" ? "audit" : "sales";
+  const fmt = (n) => (Math.round((Number(n) || 0) * 100) / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+  const fmtDate = (iso) => { if (!iso) return ""; const [y, m, d] = String(iso).slice(0, 10).split("-").map(Number); return `${String(d).padStart(2, "0")} ${MONTHS[m - 1]} ${y}`; };
+  const [me, settings] = await Promise.all([api("GET", "/api/me"), api("GET", "/api/settings")]);
+  const cur = settings.currency;
+  const now = new Date().toLocaleString("en-GB", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
+  const address = [...(settings.address || "").split("\n"), settings.trn && `TRN ${settings.trn}`, settings.phone, settings.email, settings.website].filter(Boolean).map(esc).join(" · ");
+  const head = (title, sub) => `
+    <div class="head">
+      <div>${settings.logo ? `<img src="${esc(settings.logo)}" alt="">` : `<b>${esc(settings.name)}</b>`}<div class="addr">${address}</div></div>
+      <div class="title"><h1>${title}</h1><div>${sub}</div><div>Generated ${esc(now)} by ${esc(me.username)}</div></div>
+    </div>`;
+  const table = (cols, rows, foot) => rows.length ? `<table><thead><tr>${cols.map(c => `<th class="${c.r ? "r" : ""}">${c.h}</th>`).join("")}</tr></thead>
+    <tbody>${rows.map(r => `<tr>${cols.map(c => `<td class="${c.r ? "r" : ""}">${c.f(r)}</td>`).join("")}</tr>`).join("")}</tbody>
+    ${foot ? `<tfoot><tr>${foot.map((v, i) => `<td class="${cols[i].r ? "r" : ""}">${v}</td>`).join("")}</tr></tfoot>` : ""}</table>` : `<div class="empty">Nothing in this period.</div>`;
+
+  let xlsxUrl;
+  if (type === "sales") {
+    const from = q.get("from"), to = q.get("to");
+    const rep = await api("GET", `/api/reports?from=${encodeURIComponent(from || "")}&to=${encodeURIComponent(to || "")}`);
+    xlsxUrl = `/api/reports/export?from=${rep.from}&to=${rep.to}`;
+    const period = rep.from === rep.to ? fmtDate(rep.from) : `${fmtDate(rep.from)} – ${fmtDate(rep.to)}`;
+    document.title = `Sales report ${rep.from} to ${rep.to}`;
+    $("tbTitle").textContent = `Sales report · ${period}`;
+    const s = rep.summary;
+    $("sheet").innerHTML = head("Sales Report", esc(period)) + `
+      <div class="stats">
+        <div><span>Invoices issued</span><b>${s.invoices}</b></div>
+        <div><span>Total billed (${esc(cur)})</span><b>${fmt(s.billed)}</b></div>
+        <div><span>Received in period (${esc(cur)})</span><b>${fmt(s.received)}</b></div>
+        <div><span>Paid / partly paid / unpaid</span><b>${s.paidCount} / ${s.partialCount} / ${s.unpaidCount}</b></div>
+        <div><span>Paid on these invoices (${esc(cur)})</span><b>${fmt(s.paidOnInvoices)}</b></div>
+        <div><span>Outstanding (${esc(cur)})</span><b>${fmt(s.outstanding)}</b></div>
+      </div>
+      ${rep.monthly.length > 1 ? `<h2>Month by month</h2>` + table(
+        [{ h: "Month", f: m => esc(m.label) }, { h: "Invoices", r: 1, f: m => m.invoices }, { h: `Billed (${esc(cur)})`, r: 1, f: m => fmt(m.billed) }, { h: `Received (${esc(cur)})`, r: 1, f: m => fmt(m.received) }],
+        rep.monthly, ["Total", s.invoices, fmt(s.billed), fmt(s.received)]) : ""}
+      <div class="two">
+        <div><h2>By course</h2>${table([{ h: "Course", f: x => esc(x.course) }, { h: "Qty", r: 1, f: x => x.qty }, { h: `Amount (${esc(cur)})`, r: 1, f: x => fmt(x.amount) }],
+          rep.byCourse, ["Total", rep.byCourse.reduce((a, x) => a + x.qty, 0), fmt(s.billed)])}</div>
+        <div><h2>By payment mode</h2>${table([{ h: "Mode", f: x => esc(x.mode) }, { h: "Payments", r: 1, f: x => x.count }, { h: `Amount (${esc(cur)})`, r: 1, f: x => fmt(x.amount) }],
+          rep.byMode, ["Total", s.payments, fmt(s.received)])}</div>
+      </div>
+      <h2>By staff</h2>${table([{ h: "User", f: x => esc(x.user) }, { h: "Invoices", r: 1, f: x => x.invoices }, { h: `Billed (${esc(cur)})`, r: 1, f: x => fmt(x.billed) }], rep.byStaff)}
+      <h2>Invoices (${rep.invoices.length})</h2>${table([
+        { h: "Invoice #", f: r => esc(r.number) }, { h: "Date", f: r => fmtDate(r.date) }, { h: "Student", f: r => esc(r.student) }, { h: "Courses", f: r => esc(r.courses) },
+        { h: "Total", r: 1, f: r => fmt(r.total) }, { h: "Paid", r: 1, f: r => fmt(r.paid) }, { h: "Balance", r: 1, f: r => fmt(r.balance) }, { h: "Status", f: r => esc(r.status) }],
+        rep.invoices, ["Total", "", "", "", fmt(s.billed), fmt(s.paidOnInvoices), fmt(rep.invoices.reduce((a, r) => a + r.balance, 0)), ""])}
+      <h2>Payments received (${rep.payments.length})</h2>${table([
+        { h: "Receipt #", f: p => esc(p.receipt) }, { h: "Date", f: p => fmtDate(p.date) }, { h: "Invoice #", f: p => esc(p.invoice) }, { h: "Student", f: p => esc(p.student) },
+        { h: "Mode", f: p => esc(p.mode) }, { h: "Reference", f: p => esc(p.ref) }, { h: `Amount (${esc(cur)})`, r: 1, f: p => fmt(p.amount) }],
+        rep.payments, ["Total", "", "", "", "", "", fmt(s.received)])}
+      <div class="foot">${esc(settings.name)} · Sales report ${esc(period)}</div>`;
+    api("POST", "/api/audit/viewed", { what: "Sales report (PDF view)", details: `Period ${rep.from} to ${rep.to}` }).catch(() => {});
+  } else {
+    const params = new URLSearchParams();
+    for (const k of ["from", "to", "user", "group", "q"]) if (q.get(k)) params.set(k, q.get(k));
+    params.set("limit", "5000");
+    const data = await api("GET", `/api/audit?${params}`);
+    params.delete("limit");
+    xlsxUrl = `/api/audit/export?${params}`;
+    const groups = { login: "Sign-ins", invoice: "Invoices", settings: "Settings", user: "Users & passwords", data: "Backups & reports" };
+    const filters = [q.get("from") && `From ${fmtDate(q.get("from"))}`, q.get("to") && `To ${fmtDate(q.get("to"))}`, q.get("user") && `User: ${esc(q.get("user"))}`,
+      q.get("group") && `Type: ${groups[q.get("group")] || ""}`, q.get("q") && `Search: “${esc(q.get("q"))}”`].filter(Boolean).join(" · ") || "All entries";
+    document.title = `Audit log ${new Date().toISOString().slice(0, 10)}`;
+    $("tbTitle").textContent = `Audit log · ${data.total} entries`;
+    $("sheet").classList.add("landscape");
+    $("pageSize").textContent = "@media print { @page { size: A4 landscape; margin: 10mm; } }";
+    $("sheet").innerHTML = head("Audit Log", filters) + `
+      <h2>${data.total} entr${data.total === 1 ? "y" : "ies"}${data.total > data.entries.length ? ` (showing newest ${data.entries.length})` : ""}</h2>
+      ${table([
+        { h: "Date &amp; time", f: e => `<span style="white-space:nowrap">${esc(e.time)}</span>` }, { h: "User", f: e => esc(e.user) + (e.role ? `<div class="muted">${esc(e.role)}</div>` : "") },
+        { h: "Action", f: e => esc(data.labels[e.action] || e.action) }, { h: "Item", f: e => esc(e.target) },
+        { h: "Details", f: e => esc(e.details).split("; ").join("<br>") }], data.entries)}
+      <div class="foot">${esc(settings.name)} · Audit log · entries cannot be edited or deleted</div>`;
+    api("POST", "/api/audit/viewed", { what: "Audit log (PDF view)", details: filters.replace(/<[^>]+>/g, "") }).catch(() => {});
+  }
+  $("xlsx").onclick = () => { location.href = xlsxUrl; };
+})().catch(e => { document.getElementById("sheet").innerHTML = `<div class="loading">Could not load the report: ${esc(e.message)}</div>`; });
+</script>
+</body>
+</html>
