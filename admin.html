@@ -66,15 +66,10 @@
   .logo-preview { border: 1px dashed var(--border); border-radius: 8px; padding: 14px; background: #fafbfc; margin-bottom: 10px; min-height: 60px; display: flex; align-items: center; }
   .logo-preview img { max-height: 70px; max-width: 100%; }
   .stat { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 14px; margin-bottom: 20px; }
-  .stat .kpi { background: var(--panel); border: 1px solid var(--border); border-radius: 14px; padding: 18px 20px; position: relative; overflow: hidden; }
-  .stat .kpi::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 4px; border-radius: 14px 0 0 14px; background: #203868; }
-  .stat .kpi.accent::before { background: #50A048; }
-  .stat .kpi-head { display: flex; align-items: center; justify-content: space-between; }
+  .stat .kpi { background: var(--panel); border: 1px solid var(--border); border-radius: 16px; padding: 20px 22px; }
   .stat .kpi-label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; font-weight: 600; }
-  .stat .kpi-icon { width: 36px; height: 36px; border-radius: 10px; display: grid; place-items: center; background: #e8edf6; color: #203868; }
-  .stat .kpi-icon svg { width: 18px; height: 18px; }
-  .stat .kpi.accent .kpi-icon { background: #e6f2e5; color: #50A048; }
-  .stat .kpi-val { font-size: 26px; font-weight: 700; color: var(--brand); margin-top: 8px; line-height: 1.1; }
+  .stat .kpi-val { font-size: 26px; font-weight: 700; color: var(--brand); margin-top: 10px; line-height: 1.1; }
+  .stat .kpi.accent .kpi-val { color: #3d7a1d; }
   .stat .kpi-sub { font-size: 11px; color: var(--muted); margin-top: 4px; }
   .stat > div:not(.kpi) { display: flex; align-items: baseline; gap: 6px; }
   .dash-row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px; }
@@ -147,7 +142,8 @@
   body { background: #f0f3f8 url(background-light.svg) center / cover no-repeat fixed; color: #111827; }
   main > section > h1 { color: #111827; }
   main > section > .lead { color: #6b7280; }
-  .card, .stat .kpi, .dash-card { background: #fff !important; border: 1px solid #e5e7eb !important; border-radius: 14px !important; box-shadow: 0 1px 3px rgba(0,0,0,.06) !important; }
+  .card, .dash-card { background: #fff !important; border: 1px solid #e5e7eb !important; border-radius: 14px !important; box-shadow: 0 1px 3px rgba(0,0,0,.06) !important; }
+  .stat .kpi { background: #fff !important; border: 1px solid #e5e7eb !important; border-radius: 16px !important; box-shadow: 0 1px 3px rgba(0,0,0,.06) !important; }
   .side { background: #fff !important; border: 1px solid #e5e7eb !important; border-radius: 26px !important; box-shadow: 0 1px 6px rgba(0,0,0,.08) !important; }
   .card h3, .dash-card h3 { color: #111827 !important; font-size: 15px; font-weight: 700; }
   .progress-track { background: #f3f4f6; }
@@ -216,8 +212,7 @@
   html[data-theme="dark"] .status-label { color: #a9b8d3; }
   html[data-theme="dark"] .legend-item { color: #a9b8d3 !important; }
   html[data-theme="dark"] .kpi-sub { color: #8796b3 !important; }
-  html[data-theme="dark"] .kpi-icon { background: rgba(255,255,255,.08) !important; color: #a9b8d3 !important; }
-  html[data-theme="dark"] .kpi.accent .kpi-icon { background: rgba(80,160,72,.2) !important; color: #9fe39a !important; }
+  html[data-theme="dark"] .kpi.accent .kpi-val { color: #9fe39a !important; }
   html[data-theme="dark"] .ring-bg { stroke: rgba(255,255,255,.1); }
   html[data-theme="dark"] .ring-fill { stroke: #50A048; }
   html[data-theme="dark"] .ring-center { color: #e6ecf7; }
@@ -743,10 +738,10 @@
     const avgInv = invoices.length > 0 ? billed / invoices.length : 0;
 
     $("stats").innerHTML = `
-      <div class="kpi"><div class="kpi-head"><span class="kpi-label">Total Invoices</span><div class="kpi-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg></div></div><div class="kpi-val">${invoices.length}</div><div class="kpi-sub">${monthCount} this month</div></div>
-      <div class="kpi"><div class="kpi-head"><span class="kpi-label">Total Billed (${cur})</span><div class="kpi-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg></div></div><div class="kpi-val">${fmt(billed)}</div><div class="kpi-sub">Avg ${fmt(avgInv)} per invoice</div></div>
-      <div class="kpi accent"><div class="kpi-head"><span class="kpi-label">Received (${cur})</span><div class="kpi-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg></div></div><div class="kpi-val">${fmt(received)}</div><div class="kpi-sub">${paidCount} fully paid</div></div>
-      <div class="kpi"><div class="kpi-head"><span class="kpi-label">Outstanding (${cur})</span><div class="kpi-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg></div></div><div class="kpi-val">${fmt(due)}</div><div class="kpi-sub">${dueCount + partialCount} pending</div></div>`;
+      <div class="kpi"><span class="kpi-label">Total Invoices</span><div class="kpi-val">${invoices.length}</div><div class="kpi-sub">${monthCount} this month</div></div>
+      <div class="kpi"><span class="kpi-label">Total Billed (${cur})</span><div class="kpi-val">${fmt(billed)}</div><div class="kpi-sub">Avg ${fmt(avgInv)} per invoice</div></div>
+      <div class="kpi accent"><span class="kpi-label">Received (${cur})</span><div class="kpi-val">${fmt(received)}</div><div class="kpi-sub">${paidCount} fully paid</div></div>
+      <div class="kpi"><span class="kpi-label">Outstanding (${cur})</span><div class="kpi-val">${fmt(due)}</div><div class="kpi-sub">${dueCount + partialCount} pending</div></div>`;
 
     const collPct = billed > 0 ? (received / billed * 100) : 0;
     const circ = 2 * Math.PI * 42;
