@@ -500,7 +500,7 @@
     <!-- Users -->
     <section data-pane="users">
       <h1>Users</h1>
-      <p class="lead"><b>Staff</b> can create, edit and print invoices. <b>Admins</b> can also change everything on this admin page and delete invoices.</p>
+      <p class="lead"><b>Staff</b> can create, edit and print invoices. <b>Management</b> can also change everything on this admin page and delete invoices.</p>
       <div class="card">
         <table><thead><tr><th>Username</th><th>Role</th><th>Created</th><th style="text-align:right">Actions</th></tr></thead><tbody id="userRows"></tbody></table>
       </div>
@@ -509,7 +509,7 @@
         <div class="row c3">
           <div><label>Username</label><input id="u_name" autocomplete="off"></div>
           <div><label>Password (min 6)</label><input id="u_pass" type="text" autocomplete="off"></div>
-          <div><label>Role</label><select id="u_role"><option value="staff">Staff</option><option value="admin">Admin</option></select></div>
+          <div><label>Role</label><select id="u_role"><option value="staff">Staff</option><option value="admin">Management</option></select></div>
         </div>
         <div class="actions"><button class="btn primary" id="addUser">Add user</button></div>
       </div>
@@ -863,11 +863,11 @@
       const users = await api("GET", "/api/users");
       $("userRows").innerHTML = users.map(u => `<tr>
         <td><b>${esc(u.username)}</b>${u.username === me.username ? ' <span class="muted">(you)</span>' : ""}</td>
-        <td><span class="pill ${u.role}">${u.role === "admin" ? "Admin" : "Staff"}</span></td>
+        <td><span class="pill ${u.role}">${roleLabel(u.role)}</span></td>
         <td class="muted">${fmtDate(u.createdAt)}</td>
         <td style="text-align:right;white-space:nowrap">
           <button class="btn icon" data-reset="${esc(u.username)}">Reset password</button>
-          <button class="btn icon" data-role="${esc(u.username)}" data-to="${u.role === "admin" ? "staff" : "admin"}">Make ${u.role === "admin" ? "staff" : "admin"}</button>
+          <button class="btn icon" data-role="${esc(u.username)}" data-to="${u.role === "admin" ? "staff" : "admin"}">Make ${u.role === "admin" ? "staff" : "management"}</button>
           ${u.username === me.username ? "" : `<button class="btn icon danger" data-deluser="${esc(u.username)}">Delete</button>`}
         </td></tr>`).join("");
     } catch (e) { toast(e.message); }
@@ -1053,7 +1053,7 @@
       $("a_count").textContent = `${data.total} entr${data.total === 1 ? "y" : "ies"}${data.total > data.entries.length ? ` · showing newest ${data.entries.length}` : ""}`;
       $("a_rows").innerHTML = data.entries.map(e => `<tr>
         <td style="white-space:nowrap">${esc(e.time)}</td>
-        <td><b>${esc(e.user || "—")}</b>${e.role ? `<div class="muted" style="font-size:11px">${esc(e.role)}</div>` : ""}</td>
+        <td><b>${esc(e.user || "—")}</b>${e.role ? `<div class="muted" style="font-size:11px">${esc(roleLabel(e.role))}</div>` : ""}</td>
         <td><span class="act ${ACT_CLASS[e.action] || (e.action.startsWith("invoice") || e.action.startsWith("receipt") ? "invoice" : "")}">${esc(data.labels[e.action] || e.action)}</span></td>
         <td>${esc(e.target)}</td>
         <td class="details">${esc(e.details).split("; ").join("<br>")}</td></tr>`).join("")
@@ -1195,7 +1195,7 @@
   // ---------- start ----------
   me = await api("GET", "/api/me");
   $("who").textContent = me.username.charAt(0).toUpperCase();
-  $("who").dataset.label = `${me.username} (admin) · My password`;
+  $("who").dataset.label = `${me.username} (management) · My password`;
   settings = await api("GET", "/api/settings");
   fill();
   let start = "dashboard";

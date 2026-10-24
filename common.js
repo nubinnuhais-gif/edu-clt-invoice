@@ -75,6 +75,10 @@ paintThemeButtons();
 // theme changes elsewhere — the "storage" event fires in other same-origin windows/iframes, not the one that made the change.
 window.addEventListener("storage", (e) => { if (e.key === "clt_theme" && e.newValue) setTheme(e.newValue); });
 
+// Display label for a stored role value. The role is still "admin" in the data/API/permissions —
+// only how it's shown in the UI changes.
+const roleLabel = (r) => r === "admin" ? "Management" : "Staff";
+
 async function logout() {
   try { await api("POST", "/api/logout"); } catch {}
   location.href = "/login.html";

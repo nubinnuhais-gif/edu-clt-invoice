@@ -487,7 +487,7 @@
   // ------------------------------------------------------------------
   me = await api("GET", "/api/me");
   [settings, invoices] = await Promise.all([api("GET", "/api/settings"), api("GET", "/api/invoices")]);
-  $("who").textContent = me.role === "admin" ? `${me.username} (admin)` : me.username;
+  $("who").textContent = me.role === "admin" ? `${me.username} (management)` : me.username;
   if (me.role !== "admin") {
     document.querySelectorAll(".side .rail-btn[onclick*='/admin']").forEach(b => b.style.display = "none");
     document.querySelectorAll(".side .nav .sep").forEach(s => s.style.display = "none");

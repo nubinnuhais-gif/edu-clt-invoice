@@ -273,7 +273,7 @@ async function api(req, res, url) {
   const user = getUser(req);
   if (!user) return fail(res, 401, "Please log in");
   const isAdmin = user.role === "admin";
-  const adminOnly = () => { if (!isAdmin) { fail(res, 403, "Admin only"); return true; } return false; };
+  const adminOnly = () => { if (!isAdmin) { fail(res, 403, "Management only"); return true; } return false; };
 
   if (route === "POST /api/logout") {
     sessions.delete(user.token);
