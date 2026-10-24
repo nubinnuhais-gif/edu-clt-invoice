@@ -677,7 +677,9 @@ const PAGES = { "/": ["index.html", "staff"], "/index.html": ["index.html", "sta
 function serveFile(res, file, type) {
   fs.readFile(path.join(ROOT, file), (err, data) => {
     if (err) return send(res, 404, "Not found");
-    res.writeHead(200, { "Content-Type": type, "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff", "X-Frame-Options": "DENY" });
+    // SAMEORIGIN (not DENY): the admin panel embeds the invoice screen in an iframe so staff never
+    // leave the admin shell; still blocks any other site from framing us (clickjacking protection).
+    res.writeHead(200, { "Content-Type": type, "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff", "X-Frame-Options": "SAMEORIGIN" });
     res.end(data);
   });
 }

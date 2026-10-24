@@ -138,6 +138,7 @@
   .details { font-size: 12px; color: #374151; line-height: 1.5; }
   section[data-pane] { display: none; }
   section[data-pane].show { display: block; }
+  section[data-pane="invoices"].show { display: flex; flex-direction: column; height: calc(100vh - 56px); }
   .toast { position: fixed; bottom: 22px; left: 50%; transform: translateX(-50%); background: #1f2328; color: #fff; padding: 10px 18px; border-radius: 8px; font-size: 13px; opacity: 0; transition: opacity .2s; pointer-events: none; z-index: 60; }
   .toast.show { opacity: 1; }
 </style>
@@ -283,7 +284,7 @@
     <div class="mark" title="Consulting, Learning &amp; Training FZE (CLT)"><img class="for-light" src="logo-mark-transparent.png" alt="Consulting, Learning &amp; Training FZE (CLT)"><img class="for-dark" src="logo-mark-dark.png" alt="Consulting, Learning &amp; Training FZE (CLT)"></div>
     <nav class="nav" id="nav">
       <button class="rail-btn active" data-go="dashboard" data-icon="dashboard" data-label="Dashboard" aria-label="Dashboard"></button>
-      <button class="rail-btn" onclick="location.href='/'" data-icon="receipt" data-label="Invoices" aria-label="Invoices"></button>
+      <button class="rail-btn" data-go="invoices" data-icon="receipt" data-label="Invoices" aria-label="Invoices"></button>
       <button class="rail-btn" data-go="reports" data-icon="pie" data-label="Reports" aria-label="Reports"></button>
       <button class="rail-btn" data-go="audit" data-icon="history" data-label="Audit log" aria-label="Audit log"></button>
       <button class="rail-btn" data-go="journals" data-icon="sheet" data-label="Manual journals" aria-label="Manual journals"></button>
@@ -340,6 +341,11 @@
         <h3><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg> Recent Invoices</h3>
         <table class="recent-table"><thead><tr><th>Invoice #</th><th>Date</th><th>Student</th><th style="text-align:right">Total</th><th style="text-align:right">Balance</th><th>Status</th><th>By</th></tr></thead><tbody id="recent"></tbody></table>
       </div>
+    </section>
+
+    <!-- Invoices (the invoice screen, embedded so staff/admin never leave this panel) -->
+    <section data-pane="invoices">
+      <iframe id="invoicesFrame" title="Invoices" style="flex:1;width:100%;border:1px solid var(--border);border-radius:16px;background:#fff"></iframe>
     </section>
 
     <!-- Reports -->
@@ -690,6 +696,7 @@
     if (name === "audit") loadAudit(true);
     if (name === "journals") loadJournals();
     if (name === "email") { loadMailSettings(); loadMailLog(); } else stopMailPoll();
+    if (name === "invoices" && !$("invoicesFrame").dataset.loaded) { $("invoicesFrame").dataset.loaded = "1"; $("invoicesFrame").src = "/?embed=1"; }
     try { sessionStorage.setItem("adminPane", name); } catch {}
   }
   document.querySelectorAll("[data-go]").forEach(b => b.onclick = () => go(b.dataset.go));

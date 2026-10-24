@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <script>try{var t=localStorage.getItem("clt_theme");if(!t)t=matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light";document.documentElement.dataset.theme=t}catch(e){}</script>
+<script>if(new URLSearchParams(location.search).has("embed"))document.documentElement.classList.add("embed");</script>
 <title>CLT FZE Invoices</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Open+Sans:wght@300;400;600;700&family=Poppins:ital,wght@0,400;0,500;0,600;0,700;1,700;1,800&display=swap" rel="stylesheet">
@@ -243,6 +244,11 @@
   .rc-tnc li { margin-bottom: 12px; }
 
   .empty-note { padding: 40px; text-align: center; color: var(--ui-muted); background: #fff; border-radius: 10px; border: 1px dashed var(--ui-border); }
+
+  /* Embedded in the admin panel's iframe: the admin shell already provides the sidebar/nav */
+  html.embed .side, html.embed #who { display: none !important; }
+  html.embed .main-area { margin-left: 0 !important; margin-right: 0 !important; }
+  html.embed body { background: var(--ui-bg); }
 
   @media print {
     @page { size: A4; margin: 0; }

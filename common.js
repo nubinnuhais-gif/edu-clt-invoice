@@ -71,6 +71,9 @@ function setTheme(t) {
 }
 document.querySelectorAll(".theme-toggle").forEach(b => b.addEventListener("click", () => setTheme(currentTheme() === "dark" ? "light" : "dark")));
 paintThemeButtons();
+// Keep same-origin frames (e.g. the invoice screen embedded in the admin panel) in sync when the
+// theme changes elsewhere — the "storage" event fires in other same-origin windows/iframes, not the one that made the change.
+window.addEventListener("storage", (e) => { if (e.key === "clt_theme" && e.newValue) setTheme(e.newValue); });
 
 async function logout() {
   try { await api("POST", "/api/logout"); } catch {}
