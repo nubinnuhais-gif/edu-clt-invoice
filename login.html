@@ -90,31 +90,6 @@
     to   { opacity: 1; transform: translateY(0) scale(1); }
   }
 
-  /* Animated gradient border (top) */
-  .card::before {
-    content: ""; position: absolute; left: 0; right: 0; top: 0; height: 3px; border-radius: 20px 20px 0 0;
-    background: linear-gradient(90deg, var(--accent), #2e6bc4, var(--green), #2e6bc4, var(--accent));
-    background-size: 300% 100%;
-    animation: borderShimmer 4s linear infinite;
-  }
-  @keyframes borderShimmer {
-    0% { background-position: 0% 50%; }
-    100% { background-position: 300% 50%; }
-  }
-
-  /* Shimmer sweep across card */
-  .card::after {
-    content: ""; position: absolute; inset: 0; border-radius: 20px; overflow: hidden;
-    background: linear-gradient(90deg, transparent, rgba(255,255,255,.06), transparent);
-    background-size: 50% 100%; background-repeat: no-repeat;
-    animation: cardShimmer 3s 1s ease-in-out infinite;
-    pointer-events: none;
-  }
-  @keyframes cardShimmer {
-    0%   { background-position: -50% 0; }
-    100% { background-position: 150% 0; }
-  }
-
   /* ---------- Form elements ---------- */
   h1 {
     font-size: 22px; font-weight: 700; text-align: center; letter-spacing: -.01em;
@@ -189,7 +164,6 @@
     border-color: rgba(255,255,255,.10);
     box-shadow: 0 20px 60px rgba(0,0,0,.50), inset 0 1px 0 rgba(255,255,255,.06);
   }
-  html[data-theme="dark"] .card::after { background: linear-gradient(90deg, transparent, rgba(255,255,255,.03), transparent); }
   html[data-theme="dark"] h1 { color: #e6ecf7; }
   html[data-theme="dark"] p.sub { color: #8796b3; }
   html[data-theme="dark"] label { color: #a9b8d3; }
