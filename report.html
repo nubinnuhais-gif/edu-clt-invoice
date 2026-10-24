@@ -14,7 +14,8 @@
   .ic { width: 16px; height: 16px; }
   .toolbar { position: sticky; top: 0; z-index: 5; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; padding: 10px 16px; background: #fff; border-bottom: 1px solid var(--border); }
   .toolbar b { margin-right: auto; font-size: 14px; }
-  .toolbar button { font: inherit; font-size: 13px; font-weight: 500; display: inline-flex; gap: 6px; align-items: center; cursor: pointer; border: 1px solid var(--border); background: #fff; color: var(--text); padding: 7px 14px; border-radius: 10px; }
+  .toolbar button { font: inherit; font-size: 13px; font-weight: 500; display: inline-flex; gap: 6px; align-items: center; cursor: pointer; border: 1px solid var(--border); background: #fff; color: var(--text); padding: 7px 14px; border-radius: 10px; transition: background-color .15s ease, transform .1s ease; }
+  .toolbar button:active { transform: scale(.96); }
   .toolbar button.primary { background: var(--navy); border-color: var(--navy); color: #fff; }
   .sheet { width: 210mm; min-height: 297mm; margin: 18px auto; background: #fff; padding: 14mm 12mm; box-shadow: 0 1px 8px rgba(0,0,0,.12); }
   .sheet.landscape { width: 297mm; min-height: 210mm; }

@@ -11,6 +11,10 @@
   :root { --bg: #f0f3f8; --panel: #fff; --border: #e5e7eb; --text: #111827; --muted: #6b7280; --accent: #203868; --accent-dark: #172a50; --green: #50a048; --danger: #dc2626; }
   * { box-sizing: border-box; margin: 0; }
   html, body { height: 100%; }
+  body, .card, input {
+    transition: background-color .22s ease, color .22s ease, border-color .22s ease, box-shadow .22s ease;
+  }
+  button:active { transform: scale(.96); }
   body {
     font-family: "Poppins", Arial, sans-serif;
     background: var(--bg) url(background-light.svg) center / cover no-repeat fixed;

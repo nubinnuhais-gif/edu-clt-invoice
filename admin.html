@@ -11,6 +11,13 @@
   :root { --bg: #f8f9fb; --panel: #fff; --border: #e5e7eb; --text: #111827; --muted: #6b7280; --brand: #111827; --accent: #203868; --accent-dark: #172a50; --accent-soft: #e8edf6; --danger: #dc2626; --green: #3d7a1d; }
   * { box-sizing: border-box; }
   html, body { margin: 0; }
+  /* Smooth color transitions everywhere (e.g. switching light/dark mode), and a light press
+     feedback on buttons so nothing feels abrupt or unresponsive. More specific component rules
+     below still win for their own `transition` value. */
+  body, .card, .dash-card, .side, .topbar, .drawer, .stat .kpi, input, select, textarea, button {
+    transition: background-color .22s ease, color .22s ease, border-color .22s ease, box-shadow .22s ease;
+  }
+  button:active, .rail-btn:active { transform: scale(.96); }
   body { font-family: "Poppins", Arial, sans-serif; background: #203868 url(background.svg) center / cover no-repeat fixed; color: var(--text); font-size: 14px; }
   main > section > h1 { color: #fff; }
   main > section > .lead { color: rgba(255,255,255,.78); }
@@ -132,10 +139,14 @@
   .act.settings { background: #fff1d6; color: #8a5a00; } .act.user { background: #efe7fb; color: #5b34a6; }
   .details { font-size: 12px; color: #374151; line-height: 1.5; }
   section[data-pane] { display: none; }
-  section[data-pane].show { display: block; }
+  section[data-pane].show { display: block; animation: paneFadeIn .28s cubic-bezier(.22,.61,.36,1); }
   section[data-pane="invoices"].show { display: flex; flex-direction: column; height: calc(100vh - 56px); }
-  .toast { position: fixed; bottom: 22px; left: 50%; transform: translateX(-50%); background: #1f2328; color: #fff; padding: 10px 18px; border-radius: 8px; font-size: 13px; opacity: 0; transition: opacity .2s; pointer-events: none; z-index: 60; }
-  .toast.show { opacity: 1; }
+  @keyframes paneFadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+  @media (prefers-reduced-motion: reduce) { section[data-pane].show { animation: none; } }
+  .spinner { width: 32px; height: 32px; border: 3px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin .7s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .toast { position: fixed; bottom: 22px; left: 50%; transform: translateX(-50%) translateY(8px); background: #1f2328; color: #fff; padding: 10px 18px; border-radius: 8px; font-size: 13px; opacity: 0; transition: opacity .25s ease, transform .25s ease; pointer-events: none; z-index: 60; }
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
 </style>
 <style>
   /* ---------- Clean white light theme ---------- */
@@ -339,8 +350,11 @@
     </section>
 
     <!-- Invoices (the invoice screen, embedded so staff/admin never leave this panel) -->
-    <section data-pane="invoices">
-      <iframe id="invoicesFrame" title="Invoices" style="flex:1;width:100%;border:1px solid var(--border);border-radius:16px;background:#fff"></iframe>
+    <section data-pane="invoices" style="position:relative">
+      <div id="invoicesLoading" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center">
+        <div class="spinner"></div>
+      </div>
+      <iframe id="invoicesFrame" title="Invoices" style="flex:1;width:100%;border:1px solid var(--border);border-radius:16px;background:#fff;opacity:0;transition:opacity .3s ease"></iframe>
     </section>
 
     <!-- Reports -->
@@ -691,7 +705,11 @@
     if (name === "audit") loadAudit(true);
     if (name === "journals") loadJournals();
     if (name === "email") { loadMailSettings(); loadMailLog(); } else stopMailPoll();
-    if (name === "invoices" && !$("invoicesFrame").dataset.loaded) { $("invoicesFrame").dataset.loaded = "1"; $("invoicesFrame").src = "/?embed=1"; }
+    if (name === "invoices" && !$("invoicesFrame").dataset.loaded) {
+      $("invoicesFrame").dataset.loaded = "1";
+      $("invoicesFrame").onload = () => { $("invoicesFrame").style.opacity = "1"; $("invoicesLoading").style.display = "none"; };
+      $("invoicesFrame").src = "/?embed=1";
+    }
     try { sessionStorage.setItem("adminPane", name); } catch {}
   }
   document.querySelectorAll("[data-go]").forEach(b => b.onclick = () => go(b.dataset.go));

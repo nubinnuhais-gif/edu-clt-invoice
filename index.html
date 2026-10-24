@@ -23,6 +23,13 @@
   }
   * { box-sizing: border-box; }
   html, body { margin: 0; }
+  /* Smooth color transitions everywhere (e.g. switching light/dark mode), and a light press
+     feedback on buttons so nothing feels abrupt or unresponsive. More specific component rules
+     below still win for their own `transition` value. */
+  body, .panel, .side, .topbar, .drawer, .item-card, .pay-card, input, select, textarea, button {
+    transition: background-color .22s ease, color .22s ease, border-color .22s ease, box-shadow .22s ease;
+  }
+  button:active, .rail-btn:active { transform: scale(.96); }
   body {
     font-family: "Poppins", Arial, sans-serif;
     background: #203868 url(background.svg) center / cover no-repeat fixed;
@@ -97,13 +104,19 @@
   .tabs select { width: auto; }
 
   /* Drawer (saved invoices / settings) */
-  .overlay { position: fixed; inset: 0; background: rgba(0,0,0,.35); display: none; z-index: 50; }
-  .overlay.open { display: block; }
+  .overlay {
+    position: fixed; inset: 0; background: rgba(0,0,0,.35); z-index: 50;
+    opacity: 0; visibility: hidden; transition: opacity .25s ease, visibility 0s linear .25s;
+  }
+  .overlay.open { opacity: 1; visibility: visible; transition: opacity .25s ease, visibility 0s linear 0s; }
   .drawer {
     position: absolute; right: 0; top: 0; bottom: 0; width: min(520px, 100%);
     background: #fff; padding: 18px; overflow-y: auto;
+    transform: translateX(24px); transition: transform .3s cubic-bezier(.22,.61,.36,1), background-color .22s ease;
   }
+  .overlay.open .drawer { transform: translateX(0); }
   .drawer.wide { width: min(680px, 100%); }
+  @media (prefers-reduced-motion: reduce) { .overlay, .drawer { transition: none !important; } }
   .atabs { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 14px; border-bottom: 1px solid var(--ui-border); padding-bottom: 10px; }
   .atabs button.active { background: var(--ui-text); color: #fff; border-color: var(--ui-text); }
   table.admin-table { width: 100%; border-collapse: collapse; margin-bottom: 10px; }
@@ -124,11 +137,11 @@
   .badge.partial { background: #fff1d6; color: #9a6400; }
   .badge.due { background: #fde2e2; color: #a12020; }
   .toast {
-    position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
+    position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%) translateY(8px);
     background: #1f2328; color: #fff; padding: 9px 16px; border-radius: 8px; font-size: 13px;
-    opacity: 0; transition: opacity .2s; pointer-events: none; z-index: 60;
+    opacity: 0; transition: opacity .25s ease, transform .25s ease; pointer-events: none; z-index: 60;
   }
-  .toast.show { opacity: 1; }
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
 
   /* ---------- Sidebar (floating icon rail) ---------- */
   .shell { min-height: 100vh; }

@@ -2,18 +2,51 @@
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
+// Slim progress bar at the top of the page while any request is in flight, so network calls never
+// feel "stuck" with no feedback. Shared by every page that loads this file.
+let _apiPending = 0, _apiBar;
+function _apiBarEl() {
+  if (_apiBar) return _apiBar;
+  _apiBar = document.createElement("div");
+  _apiBar.id = "apiProgressBar";
+  _apiBar.style.cssText = "position:fixed;top:0;left:0;height:3px;width:0%;z-index:99999;" +
+    "background:linear-gradient(90deg,#203868,#50A048);opacity:0;pointer-events:none;" +
+    "transition:width .3s ease,opacity .2s ease;";
+  document.body.appendChild(_apiBar);
+  return _apiBar;
+}
+function _apiBarStart() {
+  _apiPending++;
+  if (_apiPending > 1) return;
+  const bar = _apiBarEl();
+  bar.style.transition = "none"; bar.style.width = "0%"; bar.style.opacity = "1";
+  requestAnimationFrame(() => { bar.style.transition = "width .3s ease, opacity .2s ease"; bar.style.width = "75%"; });
+}
+function _apiBarEnd() {
+  _apiPending = Math.max(0, _apiPending - 1);
+  if (_apiPending > 0) return;
+  const bar = _apiBarEl();
+  bar.style.width = "100%";
+  setTimeout(() => { bar.style.opacity = "0"; }, 150);
+}
+
 // Call the server API; sends the user to the login page when the session has expired.
 async function api(method, url, body) {
-  const res = await fetch(url, {
-    method,
-    headers: body !== undefined || method !== "GET" ? { "Content-Type": "application/json" } : {},
-    body: body !== undefined ? JSON.stringify(body) : (method !== "GET" ? "{}" : undefined),
-    credentials: "same-origin"
-  });
-  if (res.status === 401 && !url.endsWith("/login")) { location.href = "/login.html"; throw new Error("Please log in"); }
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
-  return data;
+  _apiBarStart();
+  try {
+    const res = await fetch(url, {
+      method,
+      headers: body !== undefined || method !== "GET" ? { "Content-Type": "application/json" } : {},
+      body: body !== undefined ? JSON.stringify(body) : (method !== "GET" ? "{}" : undefined),
+      credentials: "same-origin"
+    });
+    if (res.status === 401 && !url.endsWith("/login")) { location.href = "/login.html"; throw new Error("Please log in"); }
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
+    return data;
+  } finally {
+    _apiBarEnd();
+  }
 }
 
 function toast(msg) {
