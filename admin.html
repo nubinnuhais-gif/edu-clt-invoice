@@ -1108,7 +1108,7 @@
             <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(j.notes || "—")}</td>
             <td style="font-weight:600">${c} ${fmt(total)}</td>
             <td class="muted" style="font-size:12px">${esc(j.createdBy)}</td>
-            <td><button class="btn danger icon" onclick="deleteJournal('${j.id}')" title="Delete">×</button></td>
+            <td><button class="btn danger icon" data-del-jrn="${esc(j.id)}" title="Delete">×</button></td>
           </tr>`;
         }).join("");
       }
@@ -1116,11 +1116,15 @@
       $("jrnForm").style.display = "none";
     } catch (e) { toast(e.message); }
   }
-  window.deleteJournal = async (id) => {
+  async function deleteJournal(id) {
     if (!confirm("Delete this journal entry?")) return;
     try { await api("DELETE", `/api/journals/${id}`); toast("Journal deleted"); loadJournals(); }
     catch (e) { toast(e.message); }
-  };
+  }
+  $("jrnRows").addEventListener("click", (e) => {
+    const id = e.target.dataset.delJrn; if (id === undefined) return;
+    deleteJournal(id);
+  });
 
   function jrnAccountSelect(val) {
     const opts = jrnAccounts.map(a => `<option ${a === val ? "selected" : ""}>${esc(a)}</option>`).join("");

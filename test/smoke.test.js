@@ -211,3 +211,80 @@ test("accepts a balanced journal entry and lists it", async () => {
   const list = await api("GET", "/api/journals", { cookie: adminCookie });
   assert.ok(list.body.some((j) => j.id === r.body.journal.id));
 });
+
+// ----- security regression checks -----
+
+test("login with a nonexistent username still fails cleanly (constant-time path)", async () => {
+  const r = await api("POST", "/api/login", { body: { username: "no-such-user-xyz", password: "whatever" } });
+  assert.equal(r.status, 401);
+});
+
+test("session cookie omits Secure over plain HTTP but keeps HttpOnly/SameSite", async () => {
+  const res = await fetch(BASE + "/api/login", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ username: "admin", password: ADMIN_PASSWORD })
+  });
+  const setCookie = res.headers.get("set-cookie");
+  assert.match(setCookie, /HttpOnly/);
+  assert.match(setCookie, /SameSite=Strict/);
+  assert.doesNotMatch(setCookie, /Secure/);
+});
+
+test("rejects a From address with a CRLF injection attempt", async () => {
+  const r = await api("PUT", "/api/mail-settings", {
+    cookie: adminCookie,
+    body: { host: "smtp.example.com", port: 587, fromEmail: "x@example.com\r\nBCC:attacker@evil.com" }
+  });
+  assert.equal(r.status, 400);
+});
+
+test("rejects a malformed From address", async () => {
+  const r = await api("PUT", "/api/mail-settings", { cookie: adminCookie, body: { host: "smtp.example.com", port: 587, fromEmail: "not-an-email" } });
+  assert.equal(r.status, 400);
+});
+
+test("accepts a valid From address", async () => {
+  const r = await api("PUT", "/api/mail-settings", { cookie: adminCookie, body: { host: "smtp.example.com", port: 587, fromEmail: "billing@example.com" } });
+  assert.equal(r.status, 200);
+  assert.equal(r.body.fromEmail, "billing@example.com");
+});
+
+test("caps invoice items at 200 regardless of how many are submitted", async () => {
+  const items = Array.from({ length: 250 }, (_, i) => ({ courseId: "c1", desc: `Item ${i}`, qty: 1, rate: 10, tax: 0 }));
+  const r = await api("POST", "/api/invoices", {
+    cookie: adminCookie,
+    body: { date: "2026-01-01", customer: { name: "Cap Test", email: "" }, items, payments: [] }
+  });
+  assert.equal(r.status, 201);
+  assert.ok(r.body.invoice.items.length <= 200);
+});
+
+test("rate-limits repeated test emails from the same user", async () => {
+  await api("PUT", "/api/mail-settings", { cookie: adminCookie, body: { host: "127.0.0.1", port: fakeSmtpPort, insecureTLS: true, fromEmail: "billing@clt.test" } });
+  let sawLimit = false;
+  for (let i = 0; i < 35; i++) {
+    const r = await api("POST", "/api/mail-settings/test", { cookie: adminCookie, body: { to: `probe${i}@example.com` } });
+    if (r.status === 429) { sawLimit = true; break; }
+  }
+  assert.ok(sawLimit, "expected a 429 after enough rapid email sends");
+  // the queued sends before the 429 are still completing against the fake SMTP server in the
+  // background — give them a moment so they don't outlive the suite's teardown (ECONNRESET noise).
+  await new Promise((r) => setTimeout(r, 1500));
+});
+
+test("backup import sanitizes and rejects invalid records instead of trusting the file", async () => {
+  const bogus = {
+    invoices: [
+      { id: "bogus-1", number: "BOGUS-0001", date: "2026-01-01", customer: { name: "A".repeat(5000) }, items: [{ desc: "x", qty: 1, rate: 1 }], payments: [] },
+      { id: "bogus-2", number: "BOGUS-0002", date: "2026-01-01", customer: { name: "" }, items: [{ desc: "x", qty: 1, rate: 1 }], payments: [] }, // no name -> rejected
+      { id: "bogus-3", number: "BOGUS-0003", date: "2026-01-01", customer: { name: "No Items" }, items: [], payments: [] } // no items -> rejected
+    ]
+  };
+  const r = await api("POST", "/api/import", { cookie: adminCookie, body: bogus });
+  assert.equal(r.status, 200);
+  assert.equal(r.body.added, 1); // only bogus-1 is valid enough to import
+  const list = await api("GET", "/api/invoices", { cookie: adminCookie });
+  const imported = list.body.find((i) => i.id === "bogus-1");
+  assert.ok(imported);
+  assert.ok(imported.customer.name.length <= 200); // oversized name was truncated, not stored raw
+});

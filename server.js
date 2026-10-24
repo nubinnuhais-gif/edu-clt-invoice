@@ -69,6 +69,9 @@ function makePassword() {
   const chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789";
   return Array.from(crypto.randomBytes(10), b => chars[b % chars.length]).join("");
 }
+// A fixed, never-matching salt/hash used to run the same scryptSync cost for unknown usernames,
+// so login response time doesn't reveal whether a username exists (timing side-channel).
+const DUMMY_HASH = hashPassword(crypto.randomBytes(32).toString("hex"));
 
 function loadDb() {
   fs.mkdirSync(BACKUP_DIR, { recursive: true });
@@ -128,6 +131,19 @@ function saveDb() {
 const sessions = new Map(); // token -> { username, expires }
 const failures = new Map(); // ip -> { count, until }
 
+// Both maps only ever get entries removed when that specific token/IP is looked up again (a
+// session lookup, a login attempt). An abandoned token or an IP that fails once and never returns
+// would otherwise sit in memory forever on a long-running process — sweep out stale entries hourly.
+setInterval(() => {
+  const now = Date.now();
+  for (const [token, s] of sessions) if (s.expires < now) sessions.delete(token);
+  for (const [ip, f] of failures) if (now - (f.last || 0) > 24 * 60 * 60 * 1000) failures.delete(ip);
+  for (const [username, hits] of emailSends) {
+    const fresh = hits.filter(t => now - t < EMAIL_RATE_WINDOW_MS);
+    if (fresh.length) emailSends.set(username, fresh); else emailSends.delete(username);
+  }
+}, 60 * 60 * 1000).unref();
+
 function getUser(req) {
   const m = /(?:^|;\s*)sid=([a-f0-9]{64})/.exec(req.headers.cookie || "");
   if (!m) return null;
@@ -142,6 +158,18 @@ function getUser(req) {
 // ---------------------------------------------------------------------------
 const uid = () => Date.now().toString(36) + crypto.randomBytes(4).toString("hex");
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+// Per-user rate limit on outbound email, so a malicious or compromised account (even a low-privilege
+// staff one) can't turn the server into a spam relay through the company's own SMTP account.
+const emailSends = new Map(); // username -> timestamps[]
+const EMAIL_RATE_WINDOW_MS = 10 * 60 * 1000, EMAIL_RATE_LIMIT = 30;
+function emailRateLimited(username) {
+  const now = Date.now();
+  const hits = (emailSends.get(username) || []).filter(t => now - t < EMAIL_RATE_WINDOW_MS);
+  hits.push(now);
+  emailSends.set(username, hits);
+  return hits.length > EMAIL_RATE_LIMIT;
+}
 
 // Email send log: every attempt starts "pending" and is updated to "sent"/"failed" once the SMTP
 // conversation finishes, so the UI can show live delivery status instead of blocking on it.
@@ -171,6 +199,13 @@ function send(res, status, body, headers = {}) {
 }
 const fail = (res, status, error) => send(res, status, { error });
 
+// Adds the Secure flag when the request reached us over HTTPS (directly, or via a reverse proxy
+// that sets X-Forwarded-Proto) — kept conditional so plain-HTTP local/dev use still works.
+function sessionCookie(req, token, maxAgeSeconds) {
+  const https = req.socket.encrypted || /https/i.test(req.headers["x-forwarded-proto"] || "");
+  return `sid=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${maxAgeSeconds}${https ? "; Secure" : ""}`;
+}
+
 function readBody(req) {
   return new Promise((resolve, reject) => {
     let size = 0; const chunks = [];
@@ -192,7 +227,7 @@ function cleanInvoice(body, user, existing) {
   const s = db.settings;
   const canEditFee = user.role === "admin" || s.allowPriceEdit;
   const oldItems = existing ? existing.items : [];
-  const items = (Array.isArray(body.items) ? body.items : []).map(it => {
+  const items = (Array.isArray(body.items) ? body.items.slice(0, 200) : []).map(it => {
     let item = { courseId: str(it.courseId, 64), desc: str(it.desc, 300), qty: Math.max(0, num(it.qty)), rate: Math.max(0, num(it.rate)), tax: Math.max(0, num(it.tax)) };
     if (!canEditFee) {
       const unchanged = oldItems.find(o => o.courseId === item.courseId && o.desc === item.desc && num(o.rate) === item.rate && num(o.tax) === item.tax);
@@ -204,7 +239,7 @@ function cleanInvoice(body, user, existing) {
     }
     return item;
   }).filter(it => it && it.desc);
-  const payments = (Array.isArray(body.payments) ? body.payments : []).map(p => ({
+  const payments = (Array.isArray(body.payments) ? body.payments.slice(0, 200) : []).map(p => ({
     no: p.no ? Math.trunc(num(p.no)) : null, amount: Math.max(0, num(p.amount)), date: str(p.date, 10),
     mode: str(p.mode, 40), ref: str(p.ref, 100)
   }));
@@ -215,6 +250,28 @@ function cleanInvoice(body, user, existing) {
     items, payments, notes: str(body.notes, 2000),
     inclusive: existing ? existing.inclusive : !!s.inclusive,
     vatEnabled: existing ? existing.vatEnabled === true : !!s.vatEnabled
+  };
+}
+
+// A restored backup file is external input (it may have been edited, corrupted, or come from
+// someone else), so imported invoices get the same type coercion / length caps as a normal invoice
+// submission instead of being trusted and stored as-is.
+function sanitizeImportedInvoice(raw) {
+  const items = (Array.isArray(raw.items) ? raw.items.slice(0, 200) : []).map(it => ({
+    courseId: str(it?.courseId, 64), desc: str(it?.desc, 300), qty: Math.max(0, num(it?.qty)), rate: Math.max(0, num(it?.rate)), tax: Math.max(0, num(it?.tax))
+  })).filter(it => it.desc);
+  const payments = (Array.isArray(raw.payments) ? raw.payments.slice(0, 200) : []).map(p => ({
+    no: p?.no ? Math.trunc(num(p.no)) : null, amount: Math.max(0, num(p?.amount)), date: str(p?.date, 10), mode: str(p?.mode, 40), ref: str(p?.ref, 100)
+  }));
+  const c = raw.customer || {};
+  return {
+    id: str(raw.id, 64), number: str(raw.number, 60),
+    date: str(raw.date, 10), terms: str(raw.terms, 40), due: str(raw.due, 10),
+    customer: { name: str(c.name, 200).trim(), email: str(c.email, 200), phone: str(c.phone, 60) },
+    items, payments, notes: str(raw.notes, 2000),
+    inclusive: !!raw.inclusive, vatEnabled: raw.vatEnabled === true,
+    createdAt: str(raw.createdAt, 40) || new Date().toISOString(), updatedAt: str(raw.updatedAt, 40) || undefined,
+    createdBy: str(raw.createdBy, 100), updatedBy: raw.updatedBy ? str(raw.updatedBy, 100) : undefined
   };
 }
 
@@ -256,9 +313,13 @@ async function api(req, res, url) {
     if (f && f.until > Date.now()) return fail(res, 429, "Too many attempts. Try again in a few minutes.");
     const body = await readBody(req);
     const user = db.users.find(u => u.username.toLowerCase() === str(body.username, 100).trim().toLowerCase());
-    if (!user || !checkPassword(user, str(body.password, 200))) {
+    // Always run the scrypt check (against a dummy hash when the username doesn't exist) so a
+    // nonexistent username doesn't respond measurably faster than a wrong password — otherwise the
+    // response-time difference lets an attacker enumerate valid usernames.
+    const passwordOk = checkPassword(user || DUMMY_HASH, str(body.password, 200));
+    if (!user || !passwordOk) {
       const n = (f && f.until <= Date.now() ? 0 : (f?.count || 0)) + 1;
-      failures.set(ip, { count: n, until: n >= 8 ? Date.now() + 5 * 60 * 1000 : 0 });
+      failures.set(ip, { count: n, until: n >= 8 ? Date.now() + 5 * 60 * 1000 : 0, last: Date.now() });
       logAudit(req, { username: str(body.username, 50).trim(), role: user?.role || "" }, "login.failed", "",
         `${user ? "Wrong password" : "Unknown username"}${n >= 8 ? " · sign-in locked for 5 minutes" : ""}`);
       return fail(res, 401, "Wrong username or password");
@@ -267,7 +328,7 @@ async function api(req, res, url) {
     const token = crypto.randomBytes(32).toString("hex");
     sessions.set(token, { username: user.username, expires: Date.now() + SESSION_HOURS * 3600 * 1000 });
     logAudit(req, user, "login.success");
-    return send(res, 200, publicUser(user), { "Set-Cookie": `sid=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${SESSION_HOURS * 3600}` });
+    return send(res, 200, publicUser(user), { "Set-Cookie": sessionCookie(req, token, SESSION_HOURS * 3600) });
   }
 
   const user = getUser(req);
@@ -278,7 +339,7 @@ async function api(req, res, url) {
   if (route === "POST /api/logout") {
     sessions.delete(user.token);
     logAudit(req, user, "logout");
-    return send(res, 200, { ok: true }, { "Set-Cookie": "sid=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0" });
+    return send(res, 200, { ok: true }, { "Set-Cookie": sessionCookie(req, "", 0) });
   }
   if (route === "GET /api/me") return send(res, 200, { username: user.username, role: user.role });
   if (route === "GET /api/settings") return send(res, 200, publicSettings());
@@ -370,6 +431,7 @@ async function api(req, res, url) {
     const body = await readBody(req);
     const to = str(body.to, 200).trim() || inv.customer.email;
     if (!EMAIL_RE.test(to)) return fail(res, 400, "Enter a valid email address for the customer");
+    if (emailRateLimited(user.username)) return fail(res, 429, "Too many emails sent recently. Try again in a few minutes.");
     const log = addMailLog({ kind: "invoice", to, invoiceId: inv.id, invoiceNumber: inv.number, by: user.username });
     send(res, 202, { ok: true, queued: true, id: log.id, to });
     (async () => {
@@ -498,7 +560,10 @@ async function api(req, res, url) {
     const body = await readBody(req);
     if (!Array.isArray(body.invoices)) return fail(res, 400, "Not a valid backup file");
     const ids = new Set(db.invoices.map(i => i.id)), nums = new Set(db.invoices.map(i => i.number));
-    const added = body.invoices.filter(i => i && i.id && i.number && !ids.has(i.id) && !nums.has(i.number));
+    const added = body.invoices
+      .filter(i => i && i.id && i.number && !ids.has(i.id) && !nums.has(i.number))
+      .map(sanitizeImportedInvoice)
+      .filter(i => i.id && i.number && i.customer.name && i.items.length);
     db.invoices.push(...added);
     db.invoices.sort((a, b) => String(b.createdAt || b.date).localeCompare(String(a.createdAt || a.date)));
     // keep the counters ahead of every imported number
@@ -527,6 +592,10 @@ async function api(req, res, url) {
   if (route === "PUT /api/mail-settings") {
     if (adminOnly()) return;
     const body = await readBody(req);
+    const fromEmail = str(body.fromEmail, 200).trim();
+    // Validated (not just length-capped) because it is embedded directly into raw SMTP/MIME text
+    // (MAIL FROM / the From: header) — an unvalidated value could inject extra SMTP commands or headers.
+    if (fromEmail && !EMAIL_RE.test(fromEmail)) return fail(res, 400, 'Enter a valid "From" email address');
     const before = { ...db.mail };
     db.mail.host = str(body.host, 200).trim();
     db.mail.port = Math.min(65535, Math.max(1, Math.trunc(num(body.port)) || 587));
@@ -535,7 +604,7 @@ async function api(req, res, url) {
     db.mail.user = str(body.user, 200).trim();
     if (str(body.pass)) db.mail.pass = str(body.pass, 500);
     db.mail.fromName = str(body.fromName, 200).trim();
-    db.mail.fromEmail = str(body.fromEmail, 200).trim();
+    db.mail.fromEmail = fromEmail;
     saveDb();
     const changes = [
       before.host !== db.mail.host ? `Host: "${before.host || "—"}" → "${db.mail.host || "—"}"` : null,
@@ -556,6 +625,7 @@ async function api(req, res, url) {
     const to = str(body.to, 200).trim();
     if (!EMAIL_RE.test(to)) return fail(res, 400, "Enter a valid email address");
     if (!db.mail.host || !db.mail.fromEmail) return fail(res, 400, "Fill in the SMTP host and from-email first, then save, before sending a test");
+    if (emailRateLimited(user.username)) return fail(res, 429, "Too many emails sent recently. Try again in a few minutes.");
     const log = addMailLog({ kind: "test", to, by: user.username });
     send(res, 202, { ok: true, queued: true, id: log.id });
     sendMail({
