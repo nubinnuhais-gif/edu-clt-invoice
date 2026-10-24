@@ -1,0 +1,14 @@
+{
+  "name": "clt-invoice-system",
+  "version": "1.0.0",
+  "private": true,
+  "description": "CLT invoice, receipt and reporting system",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "puppeteer": "^25.16.0"
+  }
+}

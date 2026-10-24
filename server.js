@@ -6,6 +6,8 @@ const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
 const R = require("./reports");
+const { sendMail } = require("./mailer");
+const { renderPdfFromUrl } = require("./pdf");
 
 const PORT = process.env.PORT || 8080;
 const HOST = process.env.HOST || "127.0.0.1";
@@ -77,8 +79,11 @@ function loadDb() {
     db.users = db.users || [];
     db.settings.nextJournal = db.settings.nextJournal || 1;
     db.settings.accounts = db.settings.accounts || [];
+    db.mail = { host: "", port: 587, secure: false, insecureTLS: false, user: "", pass: "", fromName: "", fromEmail: "", ...db.mail };
+    db.mailLog = db.mailLog || [];
   } else {
-    db = { settings: { ...DEFAULT_SETTINGS }, invoices: [], journals: [], users: [] };
+    db = { settings: { ...DEFAULT_SETTINGS }, invoices: [], journals: [], users: [], mailLog: [],
+      mail: { host: "", port: 587, secure: false, insecureTLS: false, user: "", pass: "", fromName: "", fromEmail: "" } };
   }
   if (!db.users.length) {
     const password = process.env.ADMIN_PASSWORD || makePassword();
@@ -135,6 +140,22 @@ function getUser(req) {
 // Helpers
 // ---------------------------------------------------------------------------
 const uid = () => Date.now().toString(36) + crypto.randomBytes(4).toString("hex");
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+// Email send log: every attempt starts "pending" and is updated to "sent"/"failed" once the SMTP
+// conversation finishes, so the UI can show live delivery status instead of blocking on it.
+function addMailLog(entry) {
+  const e = { id: uid(), time: new Date().toISOString(), status: "pending", ...entry };
+  db.mailLog.unshift(e);
+  if (db.mailLog.length > 300) db.mailLog.length = 300;
+  saveDb();
+  return e;
+}
+function updateMailLog(id, patch) {
+  const e = db.mailLog.find(x => x.id === id);
+  if (e) { Object.assign(e, patch, { finishedAt: new Date().toISOString() }); saveDb(); }
+  return e;
+}
 const invNo = (n) => `${db.settings.invPrefix}${String(n).padStart(db.settings.invDigits, "0")}`;
 const str = (v, max = 2000) => String(v ?? "").slice(0, max);
 const num = (v) => { const n = Number(v); return Number.isFinite(n) ? n : 0; };
@@ -337,6 +358,44 @@ async function api(req, res, url) {
     return send(res, 200, { ok: true });
   }
 
+  // Email the invoice to the customer (any signed-in user; staff may email the invoices they create).
+  // Responds immediately with a "pending" log id; the actual SMTP send happens in the background —
+  // poll GET /api/mail-log/:id (or check Admin > Email settings) for the final sent/failed status.
+  m = /^\/api\/invoices\/([\w-]+)\/send$/.exec(url.pathname);
+  if (m && req.method === "POST") {
+    const inv = db.invoices.find(i => i.id === m[1]);
+    if (!inv) return fail(res, 404, "Invoice not found");
+    if (!db.mail.host || !db.mail.fromEmail) return fail(res, 400, "Email is not set up yet. Ask an admin to configure it under Admin → Email settings.");
+    const body = await readBody(req);
+    const to = str(body.to, 200).trim() || inv.customer.email;
+    if (!EMAIL_RE.test(to)) return fail(res, 400, "Enter a valid email address for the customer");
+    const log = addMailLog({ kind: "invoice", to, invoiceId: inv.id, invoiceNumber: inv.number, by: user.username });
+    send(res, 202, { ok: true, queued: true, id: log.id, to });
+    (async () => {
+      // Render the invoice to PDF with a real browser (same page, same CSS the "Print / PDF" button
+      // uses), via a short-lived internal session so Puppeteer can load the logged-in page.
+      const pdfToken = crypto.randomBytes(32).toString("hex");
+      sessions.set(pdfToken, { username: user.username, expires: Date.now() + 2 * 60 * 1000 });
+      try {
+        const pdf = await renderPdfFromUrl({ url: `http://127.0.0.1:${PORT}/?id=${inv.id}`, cookieName: "sid", cookieValue: pdfToken });
+        await sendMail({
+          host: db.mail.host, port: db.mail.port, secure: db.mail.secure, insecureTLS: db.mail.insecureTLS,
+          user: db.mail.user, pass: db.mail.pass, fromEmail: db.mail.fromEmail, fromName: db.mail.fromName || db.settings.name,
+          to, subject: `Invoice ${inv.number} from ${db.settings.name}`,
+          html: R.invoiceEmailHtml(inv, db.settings), text: R.invoiceEmailText(inv, db.settings),
+          attachments: [{ filename: `${inv.number}.pdf`, content: pdf, contentType: "application/pdf" }]
+        });
+        updateMailLog(log.id, { status: "sent" });
+        logAudit(req, user, "invoice.email", inv.number, [`Sent to ${to}`, `Student: ${inv.customer.name}`]);
+      } catch (e) {
+        updateMailLog(log.id, { status: "failed", error: e.message });
+      } finally {
+        sessions.delete(pdfToken);
+      }
+    })();
+    return;
+  }
+
   // ----- reports & audit log (admin) -----
   if (route === "GET /api/reports" || route === "GET /api/reports/export") {
     if (adminOnly()) return;
@@ -456,6 +515,73 @@ async function api(req, res, url) {
     logAudit(req, user, "backup.import", "", [`Added ${added.length} invoice(s)`, `Skipped ${body.invoices.length - added.length} already present`,
       body.settings && body.restoreSettings ? "Company settings restored" : "Settings not changed", ...added.slice(0, 50).map(i => i.number)]);
     return send(res, 200, { added: added.length, skipped: body.invoices.length - added.length, settings: publicSettings() });
+  }
+
+  // ----- email / SMTP settings (admin) -----
+  if (route === "GET /api/mail-settings") {
+    if (adminOnly()) return;
+    const { pass, ...rest } = db.mail;
+    return send(res, 200, { ...rest, hasPassword: !!pass });
+  }
+  if (route === "PUT /api/mail-settings") {
+    if (adminOnly()) return;
+    const body = await readBody(req);
+    const before = { ...db.mail };
+    db.mail.host = str(body.host, 200).trim();
+    db.mail.port = Math.min(65535, Math.max(1, Math.trunc(num(body.port)) || 587));
+    db.mail.secure = !!body.secure;
+    db.mail.insecureTLS = !!body.insecureTLS;
+    db.mail.user = str(body.user, 200).trim();
+    if (str(body.pass)) db.mail.pass = str(body.pass, 500);
+    db.mail.fromName = str(body.fromName, 200).trim();
+    db.mail.fromEmail = str(body.fromEmail, 200).trim();
+    saveDb();
+    const changes = [
+      before.host !== db.mail.host ? `Host: "${before.host || "—"}" → "${db.mail.host || "—"}"` : null,
+      before.port !== db.mail.port ? `Port: ${before.port} → ${db.mail.port}` : null,
+      before.secure !== db.mail.secure ? `Connection: ${before.secure ? "SSL/TLS" : "STARTTLS"} → ${db.mail.secure ? "SSL/TLS" : "STARTTLS"}` : null,
+      before.user !== db.mail.user ? `Username: "${before.user || "—"}" → "${db.mail.user || "—"}"` : null,
+      str(body.pass) ? "Password updated" : null,
+      before.fromName !== db.mail.fromName ? `From name: "${before.fromName || "—"}" → "${db.mail.fromName || "—"}"` : null,
+      before.fromEmail !== db.mail.fromEmail ? `From address: "${before.fromEmail || "—"}" → "${db.mail.fromEmail || "—"}"` : null
+    ].filter(Boolean);
+    if (changes.length) logAudit(req, user, "mail.settings.update", "", changes);
+    const { pass, ...rest } = db.mail;
+    return send(res, 200, { ...rest, hasPassword: !!pass });
+  }
+  if (route === "POST /api/mail-settings/test") {
+    if (adminOnly()) return;
+    const body = await readBody(req);
+    const to = str(body.to, 200).trim();
+    if (!EMAIL_RE.test(to)) return fail(res, 400, "Enter a valid email address");
+    if (!db.mail.host || !db.mail.fromEmail) return fail(res, 400, "Fill in the SMTP host and from-email first, then save, before sending a test");
+    const log = addMailLog({ kind: "test", to, by: user.username });
+    send(res, 202, { ok: true, queued: true, id: log.id });
+    sendMail({
+      host: db.mail.host, port: db.mail.port, secure: db.mail.secure, insecureTLS: db.mail.insecureTLS,
+      user: db.mail.user, pass: db.mail.pass, fromEmail: db.mail.fromEmail, fromName: db.mail.fromName || db.settings.name,
+      to, subject: `Test email from ${db.settings.name}`,
+      html: `<p>This is a test email from your invoice system (${str(db.settings.name, 200)}).</p><p>If you received this, your email settings are working correctly.</p>`,
+      text: `This is a test email from your invoice system (${db.settings.name}). If you received this, your email settings are working correctly.`
+    }).then(() => {
+      updateMailLog(log.id, { status: "sent" });
+      logAudit(req, user, "mail.settings.test", "", `Sent to ${to}`);
+    }).catch((e) => {
+      updateMailLog(log.id, { status: "failed", error: e.message });
+    });
+    return;
+  }
+  if (route === "GET /api/mail-log") {
+    if (adminOnly()) return;
+    const limit = Math.min(300, Math.max(1, Math.trunc(num(url.searchParams.get("limit"))) || 100));
+    return send(res, 200, db.mailLog.slice(0, limit));
+  }
+  m = /^\/api\/mail-log\/([\w-]+)$/.exec(url.pathname);
+  if (m && req.method === "GET") {
+    const e = db.mailLog.find(x => x.id === m[1]);
+    if (!e) return fail(res, 404, "Not found");
+    if (!isAdmin && (e.kind !== "invoice" || e.by !== user.username)) return fail(res, 403, "Not yours to view");
+    return send(res, 200, { id: e.id, status: e.status, error: e.error, to: e.to, time: e.time });
   }
 
   // ----- journals (admin) -----

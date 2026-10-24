@@ -121,6 +121,10 @@
   .recent-table .inv-status.paid { background: #e6f2e5; color: #2d6b1d; }
   .recent-table .inv-status.partial { background: #e8edf6; color: #203868; }
   .recent-table .inv-status.due { background: #f3e8e8; color: #8b2020; }
+  .mailstat { font-size: 11px; padding: 3px 10px; border-radius: 999px; font-weight: 600; white-space: nowrap; display: inline-block; }
+  .mailstat.sent { background: #e6f2e5; color: #2d6b1d; }
+  .mailstat.pending { background: #fff4d6; color: #8a6d00; }
+  .mailstat.failed { background: #f3e8e8; color: #8b2020; }
   .numprev { font-size: 15px; font-weight: 600; color: var(--accent); }
   .filters { display: flex; gap: 12px; flex-wrap: wrap; align-items: flex-end; }
   .filters > div { min-width: 160px; }
@@ -230,6 +234,9 @@
   html[data-theme="dark"] .inv-status.paid { background: rgba(80,160,72,.2) !important; color: #9fe39a !important; }
   html[data-theme="dark"] .inv-status.partial { background: rgba(63,115,196,.2) !important; color: #a9c8ef !important; }
   html[data-theme="dark"] .inv-status.due { background: rgba(255,100,100,.15) !important; color: #ffb1b1 !important; }
+  html[data-theme="dark"] .mailstat.sent { background: rgba(80,160,72,.2) !important; color: #9fe39a !important; }
+  html[data-theme="dark"] .mailstat.pending { background: rgba(255,190,60,.2) !important; color: #ffd98a !important; }
+  html[data-theme="dark"] .mailstat.failed { background: rgba(255,100,100,.15) !important; color: #ffb1b1 !important; }
   html[data-theme="dark"] .recent-table tr[data-id]:hover { background: rgba(255,255,255,.05); }
   html[data-theme="dark"] .kpi-label, html[data-theme="dark"] label, html[data-theme="dark"] th { color: #a9b8d3 !important; }
   html[data-theme="dark"] .muted, html[data-theme="dark"] .check small { color: #8796b3 !important; }
@@ -286,6 +293,7 @@
       <button class="rail-btn" data-go="numbers" data-icon="hash" data-label="Invoice numbers" aria-label="Invoice numbers"></button>
       <button class="rail-btn" data-go="pricing" data-icon="sliders" data-label="Pricing &amp; VAT" aria-label="Pricing and VAT"></button>
       <button class="rail-btn" data-go="terms" data-icon="file" data-label="Terms &amp; conditions" aria-label="Terms and conditions"></button>
+      <button class="rail-btn" data-go="email" data-icon="mail" data-label="Email settings" aria-label="Email settings"></button>
       <div class="sep"></div>
       <button class="rail-btn" data-go="users" data-icon="users" data-label="Users" aria-label="Users"></button>
       <button class="rail-btn" data-go="backup" data-icon="download" data-label="Backup" aria-label="Backup"></button>
@@ -611,6 +619,42 @@
       </div>
     </section>
 
+    <!-- Email settings -->
+    <section data-pane="email">
+      <h1>Email settings</h1>
+      <p class="lead">Lets staff send invoices to students by email, using your own SMTP mailbox (Gmail, Office 365, Zoho, cPanel, etc.).</p>
+      <div class="card">
+        <div class="row c2">
+          <div><label>SMTP host</label><input id="m_host" placeholder="smtp.example.com"></div>
+          <div><label>Port</label><input id="m_port" type="number" min="1" max="65535" placeholder="587"></div>
+        </div>
+        <label class="check"><input type="checkbox" id="m_secure"><span>Use SSL/TLS from the start<small>Turn this on for port 465. Leave off for port 587 or 25 (the app will use STARTTLS automatically if the server offers it).</small></span></label>
+        <label class="check"><input type="checkbox" id="m_insecureTLS"><span>Skip certificate verification<small>Only enable this if your mail server uses a self-signed certificate and you trust the network.</small></span></label>
+        <div class="row c2" style="margin-top:14px">
+          <div><label>SMTP username</label><input id="m_user" placeholder="you@example.com"></div>
+          <div><label>SMTP password</label><input id="m_pass" type="password" autocomplete="new-password"></div>
+        </div>
+        <div class="row c2">
+          <div><label>From name</label><input id="m_fromName" placeholder="Consulting, Learning &amp; Training FZE"></div>
+          <div><label>From email address</label><input id="m_fromEmail" placeholder="billing@example.com"></div>
+        </div>
+        <div class="actions"><button class="btn primary" id="saveMail">Save email settings</button></div>
+      </div>
+      <div class="card">
+        <h3 style="margin-top:0">Send a test email</h3>
+        <div class="row c2">
+          <div><label>Send test to</label><input id="m_testTo" type="email" placeholder="you@example.com"></div>
+        </div>
+        <div class="actions"><button class="btn" id="sendTestMail">Send test email</button></div>
+      </div>
+      <div class="card">
+        <h3 style="margin-top:0">Recent email activity</h3>
+        <p class="lead" style="margin-bottom:10px">Every invoice email and test email, with its delivery status. Updates automatically while anything is pending.</p>
+        <div class="actions" style="margin-top:0;margin-bottom:10px"><button class="btn" id="refreshMailLog">Refresh</button></div>
+        <table><thead><tr><th style="width:150px">Time</th><th>To</th><th>Type</th><th style="width:100px">Status</th><th>Details</th></tr></thead><tbody id="mailLogRows"></tbody></table>
+      </div>
+    </section>
+
     <!-- Password -->
     <section data-pane="password">
       <h1>My password</h1>
@@ -645,6 +689,7 @@
     if (name === "reports") loadReport();
     if (name === "audit") loadAudit(true);
     if (name === "journals") loadJournals();
+    if (name === "email") { loadMailSettings(); loadMailLog(); } else stopMailPoll();
     try { sessionStorage.setItem("adminPane", name); } catch {}
   }
   document.querySelectorAll("[data-go]").forEach(b => b.onclick = () => go(b.dataset.go));
@@ -860,6 +905,63 @@
     e.target.value = "";
   };
 
+  // ---------- email settings ----------
+  let mailCfg = {};
+  async function loadMailSettings() {
+    try { mailCfg = await api("GET", "/api/mail-settings"); fillMail(); } catch (e) { toast(e.message); }
+  }
+  function fillMail() {
+    $("m_host").value = mailCfg.host || "";
+    $("m_port").value = mailCfg.port || 587;
+    $("m_secure").checked = !!mailCfg.secure;
+    $("m_insecureTLS").checked = !!mailCfg.insecureTLS;
+    $("m_user").value = mailCfg.user || "";
+    $("m_pass").value = "";
+    $("m_pass").placeholder = mailCfg.hasPassword ? "•••••• (leave blank to keep)" : "Password";
+    $("m_fromName").value = mailCfg.fromName || "";
+    $("m_fromEmail").value = mailCfg.fromEmail || "";
+  }
+  $("saveMail").onclick = async () => {
+    try {
+      mailCfg = await api("PUT", "/api/mail-settings", {
+        host: $("m_host").value, port: $("m_port").value, secure: $("m_secure").checked, insecureTLS: $("m_insecureTLS").checked,
+        user: $("m_user").value, pass: $("m_pass").value, fromName: $("m_fromName").value, fromEmail: $("m_fromEmail").value
+      });
+      fillMail(); toast("Email settings saved");
+    } catch (e) { toast(e.message); }
+  };
+  $("sendTestMail").onclick = async () => {
+    const to = $("m_testTo").value.trim();
+    if (!to) { toast("Enter an email address to test"); return; }
+    $("sendTestMail").disabled = true;
+    try { await api("POST", "/api/mail-settings/test", { to }); toast("Test email queued — see Recent email activity below"); loadMailLog(); }
+    catch (e) { toast(e.message); }
+    finally { $("sendTestMail").disabled = false; }
+  };
+
+  // ---------- email activity log ----------
+  let mailPollTimer = null;
+  function stopMailPoll() { if (mailPollTimer) { clearInterval(mailPollTimer); mailPollTimer = null; } }
+  async function loadMailLog() {
+    try {
+      const log = await api("GET", "/api/mail-log?limit=100");
+      $("mailLogRows").innerHTML = log.length ? log.map(e => {
+        const type = e.kind === "invoice" ? `Invoice ${esc(e.invoiceNumber || "")}` : "Test email";
+        const label = e.status === "sent" ? "Sent" : e.status === "failed" ? "Failed" : "Pending";
+        return `<tr>
+          <td style="white-space:nowrap">${esc(new Date(e.time).toLocaleString())}</td>
+          <td>${esc(e.to)}</td>
+          <td>${type}</td>
+          <td><span class="mailstat ${e.status}">${label}</span></td>
+          <td class="muted" style="font-size:12px">${esc(e.error || "")}</td>
+        </tr>`;
+      }).join("") : `<tr><td colspan="5" class="muted">No emails sent yet.</td></tr>`;
+      if (log.some(e => e.status === "pending")) { if (!mailPollTimer) mailPollTimer = setInterval(loadMailLog, 4000); }
+      else stopMailPoll();
+    } catch (e) { toast(e.message); }
+  }
+  $("refreshMailLog").onclick = loadMailLog;
+
   // ---------- password ----------
   $("savePassword").onclick = async () => {
     if ($("p_new").value !== $("p_new2").value) { toast("New passwords do not match"); return; }
@@ -932,6 +1034,7 @@
   // ---------- audit log ----------
   let auditLimit = 200;
   const ACT_CLASS = { "login.success": "login", "logout": "login", "login.failed": "fail", "invoice.delete": "del", "settings.update": "settings",
+    "mail.settings.update": "settings", "mail.settings.test": "settings", "invoice.email": "invoice",
     "user.create": "user", "user.update": "user", "user.delete": "del", "password.change": "user" };
   const auditParams = () => {
     const p = new URLSearchParams();

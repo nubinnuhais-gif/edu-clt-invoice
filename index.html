@@ -395,6 +395,7 @@
       <button id="btnNew" data-icon="plus">New invoice</button>
       <button id="btnSave" class="primary" data-icon="save">Save</button>
       <button id="btnPrint" data-icon="printer">Print / PDF</button>
+      <button id="btnEmail" data-icon="mail">Email invoice</button>
       <button id="btnHistory" data-icon="list">Saved</button>
     </div>
 
@@ -468,6 +469,20 @@
     <h2>Saved invoices <button class="icon" data-close>✕</button></h2>
     <input class="hist-search" id="histSearch" placeholder="Search by name, invoice #, email…">
     <div id="histList"></div>
+  </div>
+</div>
+
+<!-- Email invoice dialog -->
+<div class="overlay" id="emailOverlay">
+  <div class="drawer" style="width:min(420px,100%)">
+    <h2>Email invoice <button class="icon" data-close>✕</button></h2>
+    <p style="font-size:13px;color:var(--ui-muted);margin:-8px 0 14px">Send this invoice to the student by email.</p>
+    <label>Send to</label>
+    <input id="emailTo" type="email" placeholder="name@example.com">
+    <div style="display:flex;gap:8px;margin-top:14px">
+      <button id="emailSend" class="primary" data-icon="mail">Send</button>
+      <button data-close>Cancel</button>
+    </div>
   </div>
 </div>
 

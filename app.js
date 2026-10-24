@@ -423,6 +423,36 @@
     api("POST", `/api/invoices/${doc.id}/printed`, isReceipt ? { kind: "receipt", receipt: p.no } : { kind: "invoice" }).catch(() => {});
   };
 
+  $("btnEmail").onclick = async () => {
+    if (!(await saveInvoice())) return; // the invoice must have an id to email it
+    $("emailTo").value = doc.customer.email || "";
+    $("emailOverlay").classList.add("open");
+    $("emailTo").focus();
+  };
+  function pollMailStatus(id, to, tries = 0) {
+    if (tries > 10) { toast(`Still sending to ${to}… check Admin → Email settings for the final status`); return; }
+    setTimeout(async () => {
+      try {
+        const s = await api("GET", `/api/mail-log/${id}`);
+        if (s.status === "sent") toast(`Invoice emailed to ${to}`);
+        else if (s.status === "failed") toast(`Could not email invoice: ${s.error || "unknown error"}`);
+        else pollMailStatus(id, to, tries + 1);
+      } catch { /* ignore polling errors */ }
+    }, 1500);
+  }
+  $("emailSend").onclick = async () => {
+    const to = $("emailTo").value.trim();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to)) { toast("Enter a valid email address"); return; }
+    $("emailSend").disabled = true;
+    try {
+      const r = await api("POST", `/api/invoices/${doc.id}/send`, { to });
+      toast(`Sending invoice to ${to}…`);
+      $("emailOverlay").classList.remove("open");
+      pollMailStatus(r.id, to);
+    } catch (e) { toast(e.message); }
+    finally { $("emailSend").disabled = false; }
+  };
+
   document.querySelectorAll(".overlay").forEach(o => o.addEventListener("click", e => {
     if (e.target === o || e.target.hasAttribute("data-close")) o.classList.remove("open");
   }));
@@ -478,7 +508,15 @@
     } catch {}
   }
 
-  doc = loadDraft() || blankInvoice();
-  if (doc.id) doc = blankInvoice();
-  fillForm();
+  // Opening a specific invoice directly, e.g. /?id=XYZ (used by the dashboard's "recent invoices"
+  // links, and internally by the server to render an invoice to PDF for emailing)
+  const openId = new URLSearchParams(location.search).get("id");
+  const openInvoice = openId && invoices.find(x => x.id === openId);
+  if (openInvoice) {
+    doc = structuredClone(openInvoice); view = "invoice"; receiptIdx = 0; setTab(); fillForm();
+  } else {
+    doc = loadDraft() || blankInvoice();
+    if (doc.id) doc = blankInvoice();
+    fillForm();
+  }
 })();

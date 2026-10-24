@@ -30,6 +30,66 @@ function invTotals(inv) {
 }
 
 // ---------------------------------------------------------------------------
+// Invoice email (HTML + plain-text versions sent to the customer)
+// ---------------------------------------------------------------------------
+const htmlEsc = (s) => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const money = (n) => Number(n || 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+// Short, "see attached" style — the full PDF invoice is attached separately, so this is just
+// a brief, low-noise cover note (also reads less like a typical invoice-phishing template).
+function invoiceEmailHtml(inv, settings) {
+  const t = invTotals(inv);
+  const cur = (n) => `${settings.currency} ${money(n)}`;
+  const [statusBg, statusFg] = t.status === "Paid" ? ["#e3f3da", "#3d7a1d"] : t.status === "Partially paid" ? ["#fff1d6", "#9a6400"] : ["#fde2e2", "#a12020"];
+  const addressLines = (settings.address || "").split("\n").filter(Boolean).map(htmlEsc).join("<br>");
+  const contactLines = [addressLines, settings.phone && htmlEsc(settings.phone), settings.email && htmlEsc(settings.email), settings.website && htmlEsc(settings.website)]
+    .filter(Boolean).join("<br>");
+  return `<!doctype html><html><body style="margin:0;padding:0;background:#f3f4f6;font-family:Arial,Helvetica,sans-serif">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f3f4f6;padding:24px 0">
+<tr><td align="center">
+<table role="presentation" width="560" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:10px;overflow:hidden;border:1px solid #e5e7eb">
+  <tr><td style="background:#203868;padding:20px 28px">
+    <div style="color:#fff;font-size:17px;font-weight:700">${htmlEsc(settings.name)}</div>
+  </td></tr>
+  <tr><td style="padding:24px 28px 0">
+    <div style="font-size:13px;color:#374151">Dear ${htmlEsc(inv.customer.name)},</div>
+    <div style="font-size:13px;color:#374151;margin-top:8px">Please find attached your invoice <b>${htmlEsc(inv.number)}</b>, dated ${htmlEsc(inv.date)}.</div>
+  </td></tr>
+  <tr><td style="padding:18px 28px">
+    <table width="100%" role="presentation" style="border:1px solid #e5e7eb;border-radius:8px">
+      <tr>
+        <td style="padding:12px 16px;font-size:13px;color:#6b7280">Balance Due</td>
+        <td align="right" style="padding:12px 16px;font-size:15px;font-weight:700;color:#203868">${cur(t.balance)}</td>
+      </tr>
+      <tr><td colspan="2" style="padding:0 16px 12px"><span style="background:${statusBg};color:${statusFg};font-size:11px;font-weight:600;padding:3px 9px;border-radius:10px">${t.status}</span></td></tr>
+    </table>
+  </td></tr>
+  ${inv.notes ? `<tr><td style="padding:0 28px 18px"><div style="font-size:12px;color:#6b7280;font-weight:600;margin-bottom:4px">Notes</div><div style="font-size:13px;color:#374151;white-space:pre-wrap">${htmlEsc(inv.notes)}</div></td></tr>` : ""}
+  <tr><td style="padding:0 28px 22px"><div style="font-size:13px;color:#374151">If you have any questions, just reply to this email. Thank you.</div></td></tr>
+  <tr><td style="background:#f8f9fb;padding:16px 28px;border-top:1px solid #e5e7eb">
+    <div style="font-size:12px;color:#6b7280;line-height:1.6">${contactLines}</div>
+  </td></tr>
+</table>
+</td></tr>
+</table>
+</body></html>`;
+}
+
+function invoiceEmailText(inv, settings) {
+  const t = invTotals(inv);
+  const cur = (n) => `${settings.currency} ${money(n)}`;
+  const contact = [settings.name, settings.address, settings.phone, settings.email, settings.website].filter(Boolean).join("\n");
+  return [
+    `Dear ${inv.customer.name},`, "",
+    `Please find attached your invoice ${inv.number}, dated ${inv.date}.`, "",
+    `Balance Due: ${cur(t.balance)} (${t.status})`, "",
+    inv.notes ? `Notes: ${inv.notes}\n` : null,
+    "If you have any questions, just reply to this email. Thank you.", "",
+    contact
+  ].filter(v => v !== null).join("\n");
+}
+
+// ---------------------------------------------------------------------------
 // Periods
 // ---------------------------------------------------------------------------
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -119,13 +179,13 @@ function reportSheets(rep, currency, generatedBy) {
 const ACTION_LABELS = {
   "login.success": "Signed in", "login.failed": "Failed sign-in", "logout": "Signed out",
   "invoice.create": "Created invoice", "invoice.update": "Edited invoice", "invoice.delete": "Deleted invoice",
-  "invoice.print": "Printed invoice", "receipt.print": "Printed receipt",
-  "settings.update": "Changed settings",
+  "invoice.print": "Printed invoice", "receipt.print": "Printed receipt", "invoice.email": "Emailed invoice",
+  "settings.update": "Changed settings", "mail.settings.update": "Changed email settings", "mail.settings.test": "Sent test email",
   "user.create": "Added user", "user.update": "Changed user", "user.delete": "Deleted user", "password.change": "Changed own password",
   "backup.download": "Downloaded backup", "backup.import": "Imported backup", "report.export": "Downloaded report"
 };
-const ACTION_GROUPS = { login: ["login.success", "login.failed", "logout"], invoice: ["invoice.create", "invoice.update", "invoice.delete", "invoice.print", "receipt.print"],
-  settings: ["settings.update"], user: ["user.create", "user.update", "user.delete", "password.change"], data: ["backup.download", "backup.import", "report.export"] };
+const ACTION_GROUPS = { login: ["login.success", "login.failed", "logout"], invoice: ["invoice.create", "invoice.update", "invoice.delete", "invoice.print", "receipt.print", "invoice.email"],
+  settings: ["settings.update", "mail.settings.update", "mail.settings.test"], user: ["user.create", "user.update", "user.delete", "password.change"], data: ["backup.download", "backup.import", "report.export"] };
 
 function filterAudit(entries, q) {
   const from = DATE_RE.test(q.get("from") || "") ? q.get("from") : "";
@@ -263,4 +323,4 @@ function buildXlsx(sheets) {
   return zip(files);
 }
 
-module.exports = { localStamp, invTotals, parseRange, buildReport, reportSheets, ACTION_LABELS, ACTION_GROUPS, filterAudit, auditSheets, invoiceChanges, settingsChanges, buildXlsx };
+module.exports = { localStamp, invTotals, parseRange, buildReport, reportSheets, ACTION_LABELS, ACTION_GROUPS, filterAudit, auditSheets, invoiceChanges, settingsChanges, buildXlsx, invoiceEmailHtml, invoiceEmailText };
