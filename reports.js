@@ -181,11 +181,13 @@ const ACTION_LABELS = {
   "invoice.create": "Created invoice", "invoice.update": "Edited invoice", "invoice.delete": "Deleted invoice",
   "invoice.print": "Printed invoice", "receipt.print": "Printed receipt", "invoice.email": "Emailed invoice",
   "settings.update": "Changed settings", "mail.settings.update": "Changed email settings", "mail.settings.test": "Sent test email",
+  "telegram.settings.update": "Changed Telegram backup settings",
   "user.create": "Added user", "user.update": "Changed user", "user.delete": "Deleted user", "password.change": "Changed own password",
-  "backup.download": "Downloaded backup", "backup.import": "Imported backup", "report.export": "Downloaded report"
+  "backup.download": "Downloaded backup", "backup.import": "Imported backup", "backup.telegram": "Sent backup to Telegram", "report.export": "Downloaded report"
 };
 const ACTION_GROUPS = { login: ["login.success", "login.failed", "logout"], invoice: ["invoice.create", "invoice.update", "invoice.delete", "invoice.print", "receipt.print", "invoice.email"],
-  settings: ["settings.update", "mail.settings.update", "mail.settings.test"], user: ["user.create", "user.update", "user.delete", "password.change"], data: ["backup.download", "backup.import", "report.export"] };
+  settings: ["settings.update", "mail.settings.update", "mail.settings.test", "telegram.settings.update"], user: ["user.create", "user.update", "user.delete", "password.change"],
+  data: ["backup.download", "backup.import", "backup.telegram", "report.export"] };
 
 function filterAudit(entries, q) {
   const from = DATE_RE.test(q.get("from") || "") ? q.get("from") : "";

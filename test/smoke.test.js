@@ -303,6 +303,44 @@ test("backup import sanitizes and rejects invalid records instead of trusting th
   assert.ok(imported.customer.name.length <= 200); // oversized name was truncated, not stored raw
 });
 
+test("a staff user cannot read or change the Telegram backup settings", async () => {
+  const login = await api("POST", "/api/login", { body: { username: "staffer", password: "StaffPass1" } });
+  assert.equal(login.status, 200);
+  assert.equal((await api("GET", "/api/telegram-settings", { cookie: login.cookie })).status, 403);
+  assert.equal((await api("PUT", "/api/telegram-settings", { cookie: login.cookie, body: { enabled: true, botToken: "x", chatId: "123" } })).status, 403);
+});
+
+test("Telegram backup settings validate the chat ID and require both fields before enabling", async () => {
+  const badChat = await api("PUT", "/api/telegram-settings", { cookie: adminCookie, body: { botToken: "123:abc", chatId: "not a chat id!" } });
+  assert.equal(badChat.status, 400);
+
+  const enableWithoutToken = await api("PUT", "/api/telegram-settings", { cookie: adminCookie, body: { enabled: true, chatId: "123456789" } });
+  assert.equal(enableWithoutToken.status, 400);
+
+  const saved = await api("PUT", "/api/telegram-settings", { cookie: adminCookie, body: { enabled: true, botToken: "123456789:AAfake-token", chatId: "123456789" } });
+  assert.equal(saved.status, 200);
+  assert.equal(saved.body.enabled, true);
+  assert.equal(saved.body.hasToken, true);
+  assert.equal(saved.body.chatId, "123456789");
+  assert.equal("botToken" in saved.body, false); // the raw token is never echoed back
+
+  const read = await api("GET", "/api/telegram-settings", { cookie: adminCookie });
+  assert.equal(read.status, 200);
+  assert.equal(read.body.hasToken, true);
+
+  // a channel-username chat ID is also accepted
+  const channelChat = await api("PUT", "/api/telegram-settings", { cookie: adminCookie, body: { chatId: "@my_channel" } });
+  assert.equal(channelChat.status, 200);
+  assert.equal(channelChat.body.chatId, "@my_channel");
+});
+
+test("Telegram test-backup refuses to run when unconfigured", async () => {
+  const r = await api("PUT", "/api/telegram-settings", { cookie: adminCookie, body: { enabled: false, chatId: "" } });
+  assert.equal(r.status, 200);
+  const test = await api("POST", "/api/telegram-settings/test", { cookie: adminCookie });
+  assert.equal(test.status, 400);
+});
+
 test("responses carry baseline security headers", async () => {
   const res = await fetch(BASE + "/api/me", { headers: { Cookie: adminCookie } });
   assert.match(res.headers.get("content-security-policy") || "", /default-src 'self'/);

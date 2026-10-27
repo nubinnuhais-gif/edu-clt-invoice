@@ -559,6 +559,20 @@
         </div>
         <label class="check"><input type="checkbox" id="restoreSettings"><span>Also restore company settings from the file<small>Otherwise only invoices are imported. Invoices already here are never overwritten.</small></span></label>
       </div>
+      <div class="card">
+        <h3 style="margin-top:0">Automatic Telegram backup</h3>
+        <p class="lead">Sends the same backup file to a Telegram chat every hour, so you always have an off-server copy. Create a bot with <a href="https://t.me/BotFather" target="_blank" rel="noopener">@BotFather</a> (send it <code>/newbot</code> and copy the token it gives you), then message your new bot once and open <code>https://api.telegram.org/bot&lt;token&gt;/getUpdates</code> in a browser to find your chat ID.</p>
+        <label class="check"><input type="checkbox" id="tg_enabled"><span>Send a backup to Telegram every hour</span></label>
+        <div class="row c2" style="margin-top:14px">
+          <div><label>Bot token</label><input id="tg_token" type="password" autocomplete="new-password" placeholder="123456789:AA..."></div>
+          <div><label>Chat ID</label><input id="tg_chatId" placeholder="123456789 or @mychannel"></div>
+        </div>
+        <div class="actions">
+          <button class="btn primary" id="saveTelegram">Save</button>
+          <button class="btn" id="testTelegram">Send test backup now</button>
+        </div>
+        <p class="muted" id="tg_status" style="margin:10px 0 0;font-size:12px"></p>
+      </div>
     </section>
 
     <!-- Manual Journals -->
@@ -734,6 +748,7 @@
     document.querySelectorAll("[data-go]").forEach(b => b.classList.toggle("active", b.dataset.go === name));
     document.querySelectorAll("[data-pane]").forEach(p => p.classList.toggle("show", p.dataset.pane === name));
     if (name === "users") loadUsers();
+    if (name === "backup") loadTelegram();
     if (name === "dashboard") loadDashboard();
     if (name === "reports") loadReport();
     if (name === "audit") loadAudit(true);
@@ -982,6 +997,33 @@
       toast(`Imported ${r.added} invoice(s)${r.skipped ? `, skipped ${r.skipped} already here` : ""}`);
     } catch (ex) { toast(ex.message.includes("JSON") ? "That file is not a valid backup" : ex.message); }
     e.target.value = "";
+  };
+
+  // ---------- automatic Telegram backup ----------
+  let tgCfg = {};
+  async function loadTelegram() {
+    try { tgCfg = await api("GET", "/api/telegram-settings"); fillTelegram(); } catch (e) { toast(e.message); }
+  }
+  function fillTelegram() {
+    $("tg_enabled").checked = !!tgCfg.enabled;
+    $("tg_chatId").value = tgCfg.chatId || "";
+    $("tg_token").value = "";
+    $("tg_token").placeholder = tgCfg.hasToken ? "•••••• (leave blank to keep)" : "123456789:AA...";
+    $("tg_status").textContent = tgCfg.lastSentAt
+      ? `Last sent ${new Date(tgCfg.lastSentAt).toLocaleString()} — ${tgCfg.lastStatus === "sent" ? "succeeded" : tgCfg.lastStatus || ""}`
+      : "No automatic backup has been sent yet.";
+  }
+  $("saveTelegram").onclick = async () => {
+    try {
+      tgCfg = await api("PUT", "/api/telegram-settings", { enabled: $("tg_enabled").checked, botToken: $("tg_token").value, chatId: $("tg_chatId").value });
+      fillTelegram(); toast("Telegram backup settings saved");
+    } catch (e) { toast(e.message); }
+  };
+  $("testTelegram").onclick = async () => {
+    $("testTelegram").disabled = true;
+    try { await api("POST", "/api/telegram-settings/test"); toast("Backup queued — check your Telegram chat in a moment"); setTimeout(loadTelegram, 3000); }
+    catch (e) { toast(e.message); }
+    finally { $("testTelegram").disabled = false; }
   };
 
   // ---------- email settings ----------

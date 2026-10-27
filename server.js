@@ -7,6 +7,7 @@ const path = require("path");
 const crypto = require("crypto");
 const R = require("./reports");
 const { sendMail, sendMailHttp } = require("./mailer");
+const { sendTelegramDocument } = require("./telegram");
 const { renderPdfFromUrl } = require("./pdf");
 
 const PORT = process.env.PORT || 8080;
@@ -100,9 +101,11 @@ function loadDb() {
     db.settings.accounts = db.settings.accounts || [];
     db.mail = { provider: "smtp", host: "", port: 587, secure: false, insecureTLS: false, user: "", pass: "", apiKey: "", fromName: "", fromEmail: "", ...db.mail };
     db.mailLog = db.mailLog || [];
+    db.telegram = { enabled: false, botToken: "", chatId: "", lastSentAt: "", lastStatus: "", ...db.telegram };
   } else {
     db = { settings: { ...DEFAULT_SETTINGS }, invoices: [], journals: [], users: [], mailLog: [],
-      mail: { provider: "smtp", host: "", port: 587, secure: false, insecureTLS: false, user: "", pass: "", apiKey: "", fromName: "", fromEmail: "" } };
+      mail: { provider: "smtp", host: "", port: 587, secure: false, insecureTLS: false, user: "", pass: "", apiKey: "", fromName: "", fromEmail: "" },
+      telegram: { enabled: false, botToken: "", chatId: "", lastSentAt: "", lastStatus: "" } };
   }
   if (!db.users.length) {
     const password = process.env.ADMIN_PASSWORD || makePassword();
@@ -353,6 +356,28 @@ function assignReceiptNumbers(inv) {
 
 const publicSettings = () => db.settings;
 const publicUser = (u) => ({ username: u.username, role: u.role, createdAt: u.createdAt });
+const backupPayload = () => JSON.stringify({ settings: db.settings, invoices: db.invoices, exportedAt: new Date().toISOString() }, null, 2);
+const CHAT_ID_RE = /^-?\d+$|^@[A-Za-z0-9_]{5,32}$/;
+
+// Sends the same backup as "Download backup" to the configured Telegram chat. Used by the hourly
+// scheduler and by the "Send test backup now" button; `who` is only for the audit log (the hourly
+// run has no request/user, so it's logged as "system").
+async function sendTelegramBackupNow(who) {
+  const payload = backupPayload();
+  const filename = `invoices-backup-${new Date().toISOString().replace(/[:T]/g, "-").slice(0, 16)}.json`;
+  try {
+    await sendTelegramDocument({
+      botToken: db.telegram.botToken, chatId: db.telegram.chatId, filename, content: payload,
+      caption: `${db.settings.name} — ${db.invoices.length} invoice(s) — ${R.localStamp()}`
+    });
+    db.telegram.lastSentAt = new Date().toISOString(); db.telegram.lastStatus = "sent"; saveDb();
+    logAudit(null, who || { username: "system", role: "" }, "backup.telegram", "", `Sent to Telegram (${db.invoices.length} invoices)`);
+  } catch (e) {
+    db.telegram.lastStatus = `failed: ${e.message}`; saveDb();
+    logAudit(null, who || { username: "system", role: "" }, "backup.telegram", "", `Failed: ${e.message}`);
+    throw e;
+  }
+}
 
 const DEFAULT_ACCOUNTS = [
   "Cash", "Petty Cash", "Bank", "Accounts Receivable", "Accounts Payable",
@@ -674,8 +699,42 @@ async function api(req, res, url) {
   if (route === "GET /api/backup") {
     if (adminOnly()) return;
     logAudit(req, user, "backup.download", "", `${db.invoices.length} invoices`);
-    return send(res, 200, { settings: db.settings, invoices: db.invoices, exportedAt: new Date().toISOString() },
-      { "Content-Disposition": `attachment; filename="invoices-backup-${new Date().toISOString().slice(0, 10)}.json"` });
+    return send(res, 200, backupPayload(),
+      { "Content-Type": "application/json; charset=utf-8", "Content-Disposition": `attachment; filename="invoices-backup-${new Date().toISOString().slice(0, 10)}.json"` });
+  }
+
+  // ----- automatic Telegram backup (admin) -----
+  if (route === "GET /api/telegram-settings") {
+    if (adminOnly()) return;
+    const { botToken, ...rest } = db.telegram;
+    return send(res, 200, { ...rest, hasToken: !!botToken });
+  }
+  if (route === "PUT /api/telegram-settings") {
+    if (adminOnly()) return;
+    const body = await readBody(req);
+    const chatId = str(body.chatId, 64).trim();
+    if (chatId && !CHAT_ID_RE.test(chatId)) return fail(res, 400, "Chat ID should be numeric, or a channel username starting with @");
+    const before = { ...db.telegram };
+    db.telegram.chatId = chatId;
+    if (str(body.botToken)) db.telegram.botToken = str(body.botToken, 200).trim();
+    db.telegram.enabled = !!body.enabled && !!db.telegram.botToken && !!db.telegram.chatId;
+    if (body.enabled && !db.telegram.enabled) return fail(res, 400, "Add both a bot token and a chat ID before enabling automatic backups");
+    saveDb();
+    const changes = [
+      before.enabled !== db.telegram.enabled ? `Automatic backup: ${db.telegram.enabled ? "on" : "off"}` : null,
+      before.chatId !== db.telegram.chatId ? `Chat ID: "${before.chatId || "—"}" → "${db.telegram.chatId || "—"}"` : null,
+      str(body.botToken) ? "Bot token updated" : null
+    ].filter(Boolean);
+    if (changes.length) logAudit(req, user, "telegram.settings.update", "", changes);
+    const { botToken, ...rest } = db.telegram;
+    return send(res, 200, { ...rest, hasToken: !!botToken });
+  }
+  if (route === "POST /api/telegram-settings/test") {
+    if (adminOnly()) return;
+    if (!db.telegram.botToken || !db.telegram.chatId) return fail(res, 400, "Fill in the bot token and chat ID first, then save, before testing");
+    send(res, 202, { ok: true, queued: true });
+    sendTelegramBackupNow(user).catch(() => {});
+    return;
   }
   if (route === "POST /api/import") {
     if (adminOnly()) return;
@@ -877,6 +936,11 @@ function serveFile(res, file, type) {
 
 loadDb();
 loadAudit();
+
+// Automatic Telegram backup: checked every hour, sends only when enabled in Admin > Backup.
+setInterval(() => {
+  if (db.telegram.enabled) sendTelegramBackupNow().catch(() => {});
+}, 60 * 60 * 1000).unref();
 
 http.createServer(async (req, res) => {
   const url = new URL(req.url, "http://localhost");
