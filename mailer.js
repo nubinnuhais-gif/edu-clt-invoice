@@ -2,6 +2,7 @@
 // Supports: implicit TLS (secure:true, e.g. port 465), STARTTLS (port 587/25), AUTH LOGIN.
 const net = require("net");
 const tls = require("tls");
+const https = require("https");
 const os = require("os");
 const crypto = require("crypto");
 
@@ -227,4 +228,50 @@ function sendMail(opts) {
   });
 }
 
-module.exports = { sendMail };
+// Sends via the Resend HTTPS API (https://resend.com), for hosts where outbound SMTP ports
+// are firewalled but 443 is open. No SDK — a plain JSON POST over Node's built-in https module.
+function sendMailHttp({ apiKey, fromEmail, fromName, to, subject, html, text, attachments = [], timeout = 20000 }) {
+  return new Promise((resolve, reject) => {
+    const payload = JSON.stringify({
+      from: fromName ? `${fromName} <${fromEmail}>` : fromEmail,
+      to: Array.isArray(to) ? to : [to],
+      subject,
+      html,
+      text,
+      attachments: attachments.map(a => ({
+        filename: a.filename,
+        content: Buffer.from(a.content).toString("base64"),
+      })),
+    });
+
+    const req = https.request({
+      hostname: "api.resend.com",
+      path: "/emails",
+      method: "POST",
+      timeout,
+      headers: {
+        "Authorization": `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+        "Content-Length": Buffer.byteLength(payload),
+      },
+    }, (res) => {
+      let body = "";
+      res.on("data", (d) => (body += d));
+      res.on("end", () => {
+        let parsed = {};
+        try { parsed = JSON.parse(body); } catch {}
+        if (res.statusCode >= 200 && res.statusCode < 300) {
+          resolve({ messageId: parsed.id || null });
+        } else {
+          reject(new Error(parsed.message || `Resend API responded with ${res.statusCode}`));
+        }
+      });
+    });
+
+    req.on("timeout", () => { req.destroy(new Error("Resend API request timed out")); });
+    req.on("error", (e) => reject(new Error(`Resend API request failed: ${e.message}`)));
+    req.end(payload);
+  });
+}
+
+module.exports = { sendMail, sendMailHttp };

@@ -1,6 +1,6 @@
 // Invoice screen: create, edit, print invoices and payment receipts (data stored on the server).
 (async () => {
-  const PAYMENT_MODES = ["Cash", "Card", "Bank Transfer", "Tabby", "Tamara", "Cheque", "Online"];
+  const PAYMENT_MODES = ["Cash", "Card", "Bank Transfer", "Tabby", "Tamara", "Payment Link", "POS", "Nomod", "Cheque", "Online"];
   let me, settings, invoices = [];
   let doc = null, view = "invoice", receiptIdx = 0, saving = false;
 
@@ -37,6 +37,40 @@
     return { id: null, number: "", date: d, terms: "Due on Receipt", due: d,
       customer: { name: "", email: "", phone: "" }, items: [blankItem()],
       inclusive: settings.inclusive, vatEnabled: settings.vatEnabled, payments: [], notes: "" };
+  }
+
+  // Phone: a country-code dropdown (defaulting to the UAE) next to a plain number field, so any
+  // country can be picked, not just one locked-in code. doc.customer.phone is still stored as a
+  // single "+<code> <rest>" string — splitPhone()/joinPhone() convert between that and the two
+  // on-screen fields.
+  const COUNTRY_CODES = [
+    { code: "971", label: "UAE" }, { code: "966", label: "Saudi Arabia" }, { code: "968", label: "Oman" },
+    { code: "974", label: "Qatar" }, { code: "965", label: "Kuwait" }, { code: "973", label: "Bahrain" },
+    { code: "91", label: "India" }, { code: "92", label: "Pakistan" }, { code: "880", label: "Bangladesh" },
+    { code: "94", label: "Sri Lanka" }, { code: "63", label: "Philippines" }, { code: "20", label: "Egypt" },
+    { code: "962", label: "Jordan" }, { code: "961", label: "Lebanon" }, { code: "44", label: "UK" },
+    { code: "1", label: "USA / Canada" }
+  ];
+  const DEFAULT_PHONE_CODE = "971";
+  function splitPhone(v) {
+    v = (v || "").trim();
+    if (!v) return { code: DEFAULT_PHONE_CODE, rest: "" };
+    if (v.startsWith("+")) {
+      const digits = v.slice(1).replace(/\D/g, "");
+      const match = [...COUNTRY_CODES].sort((a, b) => b.code.length - a.code.length).find(c => digits.startsWith(c.code));
+      if (match) return { code: match.code, rest: v.slice(1 + match.code.length).replace(/^[\s-]+/, "") };
+      return { code: "", rest: v }; // unrecognised code -> "Other", keep the number exactly as stored
+    }
+    return { code: DEFAULT_PHONE_CODE, rest: v.replace(/^0+/, "") };
+  }
+  function joinPhone(code, rest) {
+    rest = (rest || "").trim();
+    if (!rest) return "";
+    return code ? `+${code} ${rest}` : rest;
+  }
+  function initPhoneCodeSelect() {
+    $("c_phoneCode").innerHTML = COUNTRY_CODES.map(c => `<option value="${c.code}">+${c.code} ${esc(c.label)}</option>`).join("")
+      + `<option value="">Other</option>`;
   }
 
   // ------------------------------------------------------------------
@@ -88,7 +122,9 @@
     $("f_due").disabled = doc.terms !== "Custom";
     $("c_name").value = doc.customer.name;
     $("c_email").value = doc.customer.email;
-    $("c_phone").value = doc.customer.phone;
+    const phoneParts = splitPhone(doc.customer.phone);
+    $("c_phoneCode").value = phoneParts.code;
+    $("c_phone").value = phoneParts.rest;
     $("f_notes").value = doc.notes || "";
     renderItems(); renderPayments(); refresh();
   }
@@ -359,9 +395,13 @@
   // ------------------------------------------------------------------
   const bindings = { f_date: v => { doc.date = v; recomputeDue(); },
     f_terms: v => { doc.terms = v; recomputeDue(); }, f_due: v => doc.due = v,
-    c_name: v => doc.customer.name = v, c_email: v => doc.customer.email = v, c_phone: v => doc.customer.phone = v,
+    c_name: v => doc.customer.name = v, c_email: v => doc.customer.email = v,
     f_notes: v => doc.notes = v };
   Object.entries(bindings).forEach(([id, fn]) => $(id).addEventListener("input", e => { fn(e.target.value); refresh(); }));
+
+  // Phone: country-code dropdown + plain number field, joined back into one stored string.
+  $("c_phoneCode").addEventListener("change", (e) => { doc.customer.phone = joinPhone(e.target.value, $("c_phone").value); refresh(); });
+  $("c_phone").addEventListener("input", (e) => { doc.customer.phone = joinPhone($("c_phoneCode").value, e.target.value); refresh(); });
   $("items").addEventListener("input", e => {
     const i = e.target.dataset.item; if (i === undefined || e.target.tagName === "SELECT") return;
     doc.items[i][e.target.dataset.k] = e.target.value;
@@ -413,12 +453,19 @@
   $("btnSave").onclick = saveInvoice;
   $("btnPrint").onclick = async () => {
     if (!(await saveInvoice())) return; // every printed invoice is saved with its final number
-    const prev = document.title;
     const p = doc.payments[receiptIdx];
     const isReceipt = view === "receipt" && p;
-    document.title = isReceipt ? `Payment-${p.no}` : doc.number;
-    window.print();
-    document.title = prev;
+    if (isReceipt) {
+      // Receipts are a view of the on-screen page, not (yet) server-rendered — print via the browser.
+      const prev = document.title;
+      document.title = `Payment-${p.no}`;
+      window.print();
+      document.title = prev;
+    } else {
+      // Opens the same server-rendered PDF used for emailing invoices: no browser-added print
+      // date/URL/page-number header, since it's a real PDF file, not an HTML page being printed.
+      window.open(`/api/invoices/${doc.id}/pdf`, "_blank");
+    }
     // record the print in the audit log
     api("POST", `/api/invoices/${doc.id}/printed`, isReceipt ? { kind: "receipt", receipt: p.no } : { kind: "invoice" }).catch(() => {});
   };
@@ -486,12 +533,13 @@
   // Start
   // ------------------------------------------------------------------
   me = await api("GET", "/api/me");
+  renderImpersonationBanner(me);
+  initPhoneCodeSelect();
   [settings, invoices] = await Promise.all([api("GET", "/api/settings"), api("GET", "/api/invoices")]);
   $("who").textContent = me.role === "admin" ? `${me.username} (management)` : me.username;
-  if (me.role !== "admin") {
-    document.querySelectorAll(".side .rail-btn[onclick*='/admin']").forEach(b => b.style.display = "none");
-    document.querySelectorAll(".side .nav .sep").forEach(s => s.style.display = "none");
-  }
+  // Every admin-page link in this sidebar (Dashboard, Reports, Audit log, Journals, Courses,
+  // Company info, Invoice numbers, Pricing/VAT) is open to Staff too — only Users, Email settings
+  // and Backup are Management-only, and those live in admin.html's own sidebar, not here.
 
   // One-time move of invoices saved in this browser by the old version onto the server
   if (me.role === "admin") {

@@ -6,7 +6,7 @@ const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
 const R = require("./reports");
-const { sendMail } = require("./mailer");
+const { sendMail, sendMailHttp } = require("./mailer");
 const { renderPdfFromUrl } = require("./pdf");
 
 const PORT = process.env.PORT || 8080;
@@ -43,7 +43,8 @@ const DEFAULT_SETTINGS = {
   logo: "logo-new.png",
   vatEnabled: false, inclusive: true, allowPriceEdit: false,
   courses: [{ id: "c1", name: "Profit Matrix", fee: 4500, vat: 5 }],
-  terms: DEFAULT_TERMS.join("\n")
+  terms: DEFAULT_TERMS.join("\n"),
+  accounts: []
 };
 
 // Settings fields the admin may change, with their type
@@ -73,6 +74,20 @@ function makePassword() {
 // so login response time doesn't reveal whether a username exists (timing side-channel).
 const DUMMY_HASH = hashPassword(crypto.randomBytes(32).toString("hex"));
 
+// The server only ever binds to 127.0.0.1 and is reached through Cloudflare Tunnel (cloudflared
+// connects to that loopback address locally), so req.socket.remoteAddress is always 127.0.0.1 —
+// every visitor would otherwise share one IP bucket, making the login lockout below a shared
+// budget (one attacker's failed attempts lock out every real user) and the audit log's IP column
+// useless. Cloudflare sets CF-Connecting-IP itself on every request it forwards, so it's safe to
+// trust here; nothing can reach this process without going through the tunnel first.
+function clientIp(req) {
+  const cf = req.headers["cf-connecting-ip"];
+  if (cf) return cf.trim();
+  const xf = req.headers["x-forwarded-for"];
+  if (xf) return xf.split(",")[0].trim();
+  return (req.socket.remoteAddress || "").replace(/^::ffff:/, "");
+}
+
 function loadDb() {
   fs.mkdirSync(BACKUP_DIR, { recursive: true });
   if (fs.existsSync(DB_FILE)) {
@@ -83,11 +98,11 @@ function loadDb() {
     db.users = db.users || [];
     db.settings.nextJournal = db.settings.nextJournal || 1;
     db.settings.accounts = db.settings.accounts || [];
-    db.mail = { host: "", port: 587, secure: false, insecureTLS: false, user: "", pass: "", fromName: "", fromEmail: "", ...db.mail };
+    db.mail = { provider: "smtp", host: "", port: 587, secure: false, insecureTLS: false, user: "", pass: "", apiKey: "", fromName: "", fromEmail: "", ...db.mail };
     db.mailLog = db.mailLog || [];
   } else {
     db = { settings: { ...DEFAULT_SETTINGS }, invoices: [], journals: [], users: [], mailLog: [],
-      mail: { host: "", port: 587, secure: false, insecureTLS: false, user: "", pass: "", fromName: "", fromEmail: "" } };
+      mail: { provider: "smtp", host: "", port: 587, secure: false, insecureTLS: false, user: "", pass: "", apiKey: "", fromName: "", fromEmail: "" } };
   }
   if (!db.users.length) {
     const password = process.env.ADMIN_PASSWORD || makePassword();
@@ -111,7 +126,7 @@ function loadAudit() {
 function logAudit(req, who, action, target = "", details = "") {
   const e = { time: R.localStamp(), user: who?.username || "", role: who?.role || "", action,
     target: String(target).slice(0, 200), details: (Array.isArray(details) ? details.join("; ") : String(details)).slice(0, 4000),
-    ip: (req?.socket?.remoteAddress || "").replace(/^::ffff:/, "") };
+    ip: req ? clientIp(req) : "" };
   audit.push(e);
   fs.appendFileSync(AUDIT_FILE, JSON.stringify(e) + "\n");
 }
@@ -129,7 +144,23 @@ function saveDb() {
 // Sessions & login throttling
 // ---------------------------------------------------------------------------
 const sessions = new Map(); // token -> { username, expires }
-const failures = new Map(); // ip -> { count, until }
+const failures = new Map(); // key (ip, or "pwchg:<username>") -> { count, until, last }
+
+// Tracks consecutive failures per key and locks once `threshold` is reached. A naive "reset the
+// count when not currently locked" check can't tell "never locked yet" apart from "lock just
+// expired" — both read as until <= now — so it ends up resetting (and never accumulating past 1)
+// on every single failed attempt, silently disabling the lockout. Only reset when the record had
+// actually reached the threshold before and that lock has since expired; otherwise keep counting.
+function recordFailure(map, key, threshold = 8, lockMs = 5 * 60 * 1000) {
+  const now = Date.now();
+  let rec = map.get(key);
+  if (!rec || (rec.count >= threshold && rec.until <= now)) rec = { count: 0, until: 0 };
+  rec.count++;
+  rec.until = rec.count >= threshold ? now + lockMs : 0;
+  rec.last = now;
+  map.set(key, rec);
+  return rec;
+}
 
 // Both maps only ever get entries removed when that specific token/IP is looked up again (a
 // session lookup, a login attempt). An abandoned token or an IP that fails once and never returns
@@ -150,7 +181,7 @@ function getUser(req) {
   const s = sessions.get(m[1]);
   if (!s || s.expires < Date.now()) { sessions.delete(m[1]); return null; }
   const user = db.users.find(u => u.username === s.username);
-  return user ? { username: user.username, role: user.role, token: m[1] } : null;
+  return user ? { username: user.username, role: user.role, token: m[1], impersonatedBy: s.impersonatedBy || null } : null;
 }
 
 // ---------------------------------------------------------------------------
@@ -185,25 +216,59 @@ function updateMailLog(id, patch) {
   if (e) { Object.assign(e, patch, { finishedAt: new Date().toISOString() }); saveDb(); }
   return e;
 }
+// Dispatches to whichever provider is configured (raw SMTP, or Resend's HTTPS API for hosts
+// where outbound SMTP ports are firewalled). fromEmail/fromName/auth are pulled from db.mail.
+function sendConfiguredMail({ to, subject, html, text, attachments }) {
+  const fromName = db.mail.fromName || db.settings.name;
+  if (db.mail.provider === "resend") {
+    return sendMailHttp({ apiKey: db.mail.apiKey, fromEmail: db.mail.fromEmail, fromName, to, subject, html, text, attachments });
+  }
+  return sendMail({
+    host: db.mail.host, port: db.mail.port, secure: db.mail.secure, insecureTLS: db.mail.insecureTLS,
+    user: db.mail.user, pass: db.mail.pass, fromEmail: db.mail.fromEmail, fromName,
+    to, subject, html, text, attachments,
+  });
+}
+function mailIsConfigured() {
+  if (!db.mail.fromEmail) return false;
+  return db.mail.provider === "resend" ? !!db.mail.apiKey : !!db.mail.host;
+}
 const invNo = (n) => `${db.settings.invPrefix}${String(n).padStart(db.settings.invDigits, "0")}`;
 const str = (v, max = 2000) => String(v ?? "").slice(0, max);
 const num = (v) => { const n = Number(v); return Number.isFinite(n) ? n : 0; };
+
+// True when the request reached us over HTTPS (directly, or via a reverse proxy/tunnel that sets
+// X-Forwarded-Proto) — kept conditional so plain-HTTP local/dev use still works.
+const isHttps = (req) => req.socket.encrypted || /https/i.test(req.headers["x-forwarded-proto"] || "");
+
+// Baseline hardening headers for every response. CSP still allows 'unsafe-inline' script/style
+// (every page here uses inline <script>/<style> blocks) so it isn't a primary XSS defense, but it
+// blocks framing by other sites, stops a successful injection from loading an external script or
+// exfiltrating via fetch/form to another origin. HSTS is harmless to send over plain HTTP too —
+// browsers only ever honor it on a connection that was already HTTPS — so it isn't conditional.
+const SECURITY_HEADERS = {
+  "X-Content-Type-Options": "nosniff",
+  "Referrer-Policy": "no-referrer",
+  "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=()",
+  "Strict-Transport-Security": "max-age=15552000; includeSubDomains",
+  "Content-Security-Policy": "default-src 'self'; script-src 'self' 'unsafe-inline'; " +
+    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; " +
+    "img-src 'self' data:; connect-src 'self'; frame-ancestors 'self'; base-uri 'self'; form-action 'self'; object-src 'none'"
+};
 
 function send(res, status, body, headers = {}) {
   const isJson = typeof body !== "string" && !Buffer.isBuffer(body);
   res.writeHead(status, {
     "Content-Type": isJson ? "application/json; charset=utf-8" : "text/plain; charset=utf-8",
-    "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff", ...headers
+    "Cache-Control": "no-store", ...SECURITY_HEADERS, ...headers
   });
   res.end(isJson ? JSON.stringify(body) : body);
 }
 const fail = (res, status, error) => send(res, status, { error });
 
-// Adds the Secure flag when the request reached us over HTTPS (directly, or via a reverse proxy
-// that sets X-Forwarded-Proto) — kept conditional so plain-HTTP local/dev use still works.
+// Adds the Secure flag when the request reached us over HTTPS.
 function sessionCookie(req, token, maxAgeSeconds) {
-  const https = req.socket.encrypted || /https/i.test(req.headers["x-forwarded-proto"] || "");
-  return `sid=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${maxAgeSeconds}${https ? "; Secure" : ""}`;
+  return `sid=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${maxAgeSeconds}${isHttps(req) ? "; Secure" : ""}`;
 }
 
 function readBody(req) {
@@ -303,7 +368,7 @@ const DEFAULT_ACCOUNTS = [
 // ---------------------------------------------------------------------------
 async function api(req, res, url) {
   const route = `${req.method} ${url.pathname}`;
-  const ip = req.socket.remoteAddress;
+  const ip = clientIp(req);
 
   // Mutating requests must be JSON (blocks cross-site form posts)
   if (req.method !== "GET" && !(req.headers["content-type"] || "").startsWith("application/json")) return fail(res, 415, "JSON required");
@@ -318,10 +383,9 @@ async function api(req, res, url) {
     // response-time difference lets an attacker enumerate valid usernames.
     const passwordOk = checkPassword(user || DUMMY_HASH, str(body.password, 200));
     if (!user || !passwordOk) {
-      const n = (f && f.until <= Date.now() ? 0 : (f?.count || 0)) + 1;
-      failures.set(ip, { count: n, until: n >= 8 ? Date.now() + 5 * 60 * 1000 : 0, last: Date.now() });
+      const rec = recordFailure(failures, ip);
       logAudit(req, { username: str(body.username, 50).trim(), role: user?.role || "" }, "login.failed", "",
-        `${user ? "Wrong password" : "Unknown username"}${n >= 8 ? " · sign-in locked for 5 minutes" : ""}`);
+        `${user ? "Wrong password" : "Unknown username"}${rec.count >= 8 ? " · sign-in locked for 5 minutes" : ""}`);
       return fail(res, 401, "Wrong username or password");
     }
     failures.delete(ip);
@@ -341,11 +405,12 @@ async function api(req, res, url) {
     logAudit(req, user, "logout");
     return send(res, 200, { ok: true }, { "Set-Cookie": sessionCookie(req, "", 0) });
   }
-  if (route === "GET /api/me") return send(res, 200, { username: user.username, role: user.role });
+  if (route === "GET /api/me") return send(res, 200, { username: user.username, role: user.role, impersonatedBy: user.impersonatedBy });
   if (route === "GET /api/settings") return send(res, 200, publicSettings());
 
   if (route === "PUT /api/settings") {
-    if (adminOnly()) return;
+    // Open to staff too (company info, pricing/VAT, invoice numbering, courses) — only user
+    // management and email/SMTP credentials stay Management-only.
     const body = await readBody(req);
     const before = structuredClone(db.settings);
     for (const [k, type] of Object.entries(SETTING_TYPES)) {
@@ -420,6 +485,26 @@ async function api(req, res, url) {
     return send(res, 200, { ok: true });
   }
 
+  // Renders the same pixel-identical PDF used for emailing, for viewing/downloading on demand
+  // (e.g. from the reports table) instead of only ever being attached to an outgoing email.
+  m = /^\/api\/invoices\/([\w-]+)\/pdf$/.exec(url.pathname);
+  if (m && req.method === "GET") {
+    const inv = db.invoices.find(i => i.id === m[1]);
+    if (!inv) return fail(res, 404, "Invoice not found");
+    const pdfToken = crypto.randomBytes(32).toString("hex");
+    sessions.set(pdfToken, { username: user.username, expires: Date.now() + 2 * 60 * 1000 });
+    try {
+      const pdf = await renderPdfFromUrl({ url: `http://127.0.0.1:${PORT}/?id=${inv.id}`, cookieName: "sid", cookieValue: pdfToken });
+      const disposition = url.searchParams.get("dl") ? "attachment" : "inline";
+      logAudit(req, user, "invoice.pdf", inv.number, `Student: ${inv.customer.name}`);
+      return send(res, 200, pdf, { "Content-Type": "application/pdf", "Content-Disposition": `${disposition}; filename="${inv.number}.pdf"` });
+    } catch (e) {
+      return fail(res, 500, "Could not generate the PDF right now");
+    } finally {
+      sessions.delete(pdfToken);
+    }
+  }
+
   // Email the invoice to the customer (any signed-in user; staff may email the invoices they create).
   // Responds immediately with a "pending" log id; the actual SMTP send happens in the background —
   // poll GET /api/mail-log/:id (or check Admin > Email settings) for the final sent/failed status.
@@ -427,7 +512,7 @@ async function api(req, res, url) {
   if (m && req.method === "POST") {
     const inv = db.invoices.find(i => i.id === m[1]);
     if (!inv) return fail(res, 404, "Invoice not found");
-    if (!db.mail.host || !db.mail.fromEmail) return fail(res, 400, "Email is not set up yet. Ask an admin to configure it under Admin → Email settings.");
+    if (!mailIsConfigured()) return fail(res, 400, "Email is not set up yet. Ask an admin to configure it under Admin → Email settings.");
     const body = await readBody(req);
     const to = str(body.to, 200).trim() || inv.customer.email;
     if (!EMAIL_RE.test(to)) return fail(res, 400, "Enter a valid email address for the customer");
@@ -441,9 +526,7 @@ async function api(req, res, url) {
       sessions.set(pdfToken, { username: user.username, expires: Date.now() + 2 * 60 * 1000 });
       try {
         const pdf = await renderPdfFromUrl({ url: `http://127.0.0.1:${PORT}/?id=${inv.id}`, cookieName: "sid", cookieValue: pdfToken });
-        await sendMail({
-          host: db.mail.host, port: db.mail.port, secure: db.mail.secure, insecureTLS: db.mail.insecureTLS,
-          user: db.mail.user, pass: db.mail.pass, fromEmail: db.mail.fromEmail, fromName: db.mail.fromName || db.settings.name,
+        await sendConfiguredMail({
           to, subject: `Invoice ${inv.number} from ${db.settings.name}`,
           html: R.invoiceEmailHtml(inv, db.settings), text: R.invoiceEmailText(inv, db.settings),
           attachments: [{ filename: `${inv.number}.pdf`, content: pdf, contentType: "application/pdf" }]
@@ -459,9 +542,8 @@ async function api(req, res, url) {
     return;
   }
 
-  // ----- reports & audit log (admin) -----
+  // ----- reports & audit log (open to staff too; Users and Email settings stay Management-only) -----
   if (route === "GET /api/reports" || route === "GET /api/reports/export") {
-    if (adminOnly()) return;
     const { from, to } = R.parseRange(url.searchParams);
     const rep = R.buildReport(db.invoices, from, to);
     if (route === "GET /api/reports") return send(res, 200, { ...rep, currency: db.settings.currency });
@@ -471,7 +553,6 @@ async function api(req, res, url) {
       "Content-Disposition": `attachment; filename="sales-report_${from}_to_${to}.xlsx"` });
   }
   if (route === "GET /api/audit" || route === "GET /api/audit/export") {
-    if (adminOnly()) return;
     const list = R.filterAudit(audit, url.searchParams);
     if (route === "GET /api/audit") {
       const limit = Math.min(5000, Math.max(1, Math.trunc(num(url.searchParams.get("limit"))) || 200));
@@ -486,7 +567,6 @@ async function api(req, res, url) {
       "Content-Disposition": `attachment; filename="audit-log_${R.localStamp().slice(0, 10)}.xlsx"` });
   }
   if (route === "POST /api/audit/viewed") { // PDF views of reports are opened in the browser; log them
-    if (adminOnly()) return;
     const body = await readBody(req);
     logAudit(req, user, "report.export", str(body.what, 100), str(body.details, 300));
     return send(res, 200, { ok: true });
@@ -497,8 +577,8 @@ async function api(req, res, url) {
   if (route === "POST /api/users") {
     if (adminOnly()) return;
     const body = await readBody(req);
-    const username = str(body.username, 50).trim();
-    if (!/^[A-Za-z0-9._-]{3,50}$/.test(username)) return fail(res, 400, "Username: 3+ letters/numbers (. _ - allowed)");
+    const username = str(body.username, 80).trim();
+    if (!/^[A-Za-z0-9._@-]{3,80}$/.test(username)) return fail(res, 400, "Username: 3+ letters/numbers (. _ - @ allowed)");
     if (db.users.some(u => u.username.toLowerCase() === username.toLowerCase())) return fail(res, 400, "That username already exists");
     if (str(body.password).length < 6) return fail(res, 400, "Password must be at least 6 characters");
     const u = { username, role: body.role === "admin" ? "admin" : "staff", ...hashPassword(str(body.password)), createdAt: new Date().toISOString() };
@@ -506,10 +586,37 @@ async function api(req, res, url) {
     logAudit(req, user, "user.create", u.username, `Role: ${u.role}`);
     return send(res, 201, publicUser(u));
   }
-  m = /^\/api\/users\/([A-Za-z0-9._-]+)$/.exec(url.pathname);
+  m = /^\/api\/users\/([^/]+)\/impersonate$/.exec(url.pathname);
+  if (m && req.method === "POST") {
+    if (adminOnly()) return;
+    const target = db.users.find(x => x.username === decodeURIComponent(m[1]));
+    if (!target) return fail(res, 404, "User not found");
+    if (target.username === user.username) return fail(res, 400, "You are already signed in as this user");
+    const token = crypto.randomBytes(32).toString("hex");
+    sessions.set(token, {
+      username: target.username,
+      expires: Date.now() + SESSION_HOURS * 3600 * 1000,
+      impersonatedBy: user.username,
+    });
+    logAudit(req, user, "user.impersonate.start", target.username, `Management "${user.username}" is now viewing as "${target.username}"`);
+    return send(res, 200, publicUser(target), { "Set-Cookie": sessionCookie(req, token, SESSION_HOURS * 3600) });
+  }
+  if (route === "POST /api/impersonate/exit") {
+    const session = sessions.get(user.token);
+    const originalUsername = session && session.impersonatedBy;
+    if (!originalUsername) return fail(res, 400, "You are not viewing as another user");
+    const original = db.users.find(x => x.username === originalUsername);
+    if (!original) return fail(res, 400, "The original account no longer exists");
+    sessions.delete(user.token);
+    const token = crypto.randomBytes(32).toString("hex");
+    sessions.set(token, { username: original.username, expires: Date.now() + SESSION_HOURS * 3600 * 1000 });
+    logAudit(req, original, "user.impersonate.end", user.username, `Management "${original.username}" stopped viewing as "${user.username}"`);
+    return send(res, 200, publicUser(original), { "Set-Cookie": sessionCookie(req, token, SESSION_HOURS * 3600) });
+  }
+  m = /^\/api\/users\/([^/]+)$/.exec(url.pathname);
   if (m && (req.method === "PUT" || req.method === "DELETE")) {
     if (adminOnly()) return;
-    const u = db.users.find(x => x.username === m[1]);
+    const u = db.users.find(x => x.username === decodeURIComponent(m[1]));
     if (!u) return fail(res, 404, "User not found");
     const admins = db.users.filter(x => x.role === "admin").length;
     if (req.method === "DELETE") {
@@ -522,26 +629,40 @@ async function api(req, res, url) {
     }
     const body = await readBody(req);
     const changes = [];
+    let newPassword;
     if (body.role && body.role !== u.role) {
       if (u.role === "admin" && admins <= 1) return fail(res, 400, "Keep at least one admin");
       changes.push(`Role: ${u.role} → ${body.role === "admin" ? "admin" : "staff"}`);
       u.role = body.role === "admin" ? "admin" : "staff";
     }
-    if (body.password) {
-      if (str(body.password).length < 6) return fail(res, 400, "Password must be at least 6 characters");
-      Object.assign(u, hashPassword(str(body.password)));
+    // A reset always generates a brand-new random password rather than accepting one from the
+    // request — the point is Management never has to know (or be trusted with typing) the user's
+    // actual password, only hand them this freshly generated one. Shown once in the response, never
+    // stored or logged anywhere in plaintext.
+    if (body.resetPassword) {
+      newPassword = makePassword();
+      Object.assign(u, hashPassword(newPassword));
       for (const [t, s] of sessions) if (s.username === u.username && t !== user.token) sessions.delete(t);
       changes.push("Password reset");
     }
     saveDb();
     if (changes.length) logAudit(req, user, "user.update", u.username, changes);
-    return send(res, 200, publicUser(u));
+    return send(res, 200, { ...publicUser(u), newPassword });
   }
 
   if (route === "POST /api/password") {
+    // Rate-limited like login: a stolen/left-open session shouldn't let someone brute-force the
+    // account's real password (which may be reused elsewhere) through unlimited guesses here.
+    const key = `pwchg:${user.username}`;
+    const pf = failures.get(key);
+    if (pf && pf.until > Date.now()) return fail(res, 429, "Too many attempts. Try again in a few minutes.");
     const body = await readBody(req);
     const u = db.users.find(x => x.username === user.username);
-    if (!checkPassword(u, str(body.current))) return fail(res, 400, "Current password is wrong");
+    if (!checkPassword(u, str(body.current))) {
+      recordFailure(failures, key);
+      return fail(res, 400, "Current password is wrong");
+    }
+    failures.delete(key);
     if (str(body.next).length < 6) return fail(res, 400, "New password must be at least 6 characters");
     Object.assign(u, hashPassword(str(body.next)));
     saveDb(); logAudit(req, user, "password.change", user.username);
@@ -586,8 +707,8 @@ async function api(req, res, url) {
   // ----- email / SMTP settings (admin) -----
   if (route === "GET /api/mail-settings") {
     if (adminOnly()) return;
-    const { pass, ...rest } = db.mail;
-    return send(res, 200, { ...rest, hasPassword: !!pass });
+    const { pass, apiKey, ...rest } = db.mail;
+    return send(res, 200, { ...rest, hasPassword: !!pass, hasApiKey: !!apiKey });
   }
   if (route === "PUT /api/mail-settings") {
     if (adminOnly()) return;
@@ -597,40 +718,42 @@ async function api(req, res, url) {
     // (MAIL FROM / the From: header) — an unvalidated value could inject extra SMTP commands or headers.
     if (fromEmail && !EMAIL_RE.test(fromEmail)) return fail(res, 400, 'Enter a valid "From" email address');
     const before = { ...db.mail };
+    db.mail.provider = body.provider === "resend" ? "resend" : "smtp";
     db.mail.host = str(body.host, 200).trim();
     db.mail.port = Math.min(65535, Math.max(1, Math.trunc(num(body.port)) || 587));
     db.mail.secure = !!body.secure;
     db.mail.insecureTLS = !!body.insecureTLS;
     db.mail.user = str(body.user, 200).trim();
     if (str(body.pass)) db.mail.pass = str(body.pass, 500);
+    if (str(body.apiKey)) db.mail.apiKey = str(body.apiKey, 500);
     db.mail.fromName = str(body.fromName, 200).trim();
     db.mail.fromEmail = fromEmail;
     saveDb();
     const changes = [
+      before.provider !== db.mail.provider ? `Provider: "${before.provider}" → "${db.mail.provider}"` : null,
       before.host !== db.mail.host ? `Host: "${before.host || "—"}" → "${db.mail.host || "—"}"` : null,
       before.port !== db.mail.port ? `Port: ${before.port} → ${db.mail.port}` : null,
       before.secure !== db.mail.secure ? `Connection: ${before.secure ? "SSL/TLS" : "STARTTLS"} → ${db.mail.secure ? "SSL/TLS" : "STARTTLS"}` : null,
       before.user !== db.mail.user ? `Username: "${before.user || "—"}" → "${db.mail.user || "—"}"` : null,
       str(body.pass) ? "Password updated" : null,
+      str(body.apiKey) ? "API key updated" : null,
       before.fromName !== db.mail.fromName ? `From name: "${before.fromName || "—"}" → "${db.mail.fromName || "—"}"` : null,
       before.fromEmail !== db.mail.fromEmail ? `From address: "${before.fromEmail || "—"}" → "${db.mail.fromEmail || "—"}"` : null
     ].filter(Boolean);
     if (changes.length) logAudit(req, user, "mail.settings.update", "", changes);
-    const { pass, ...rest } = db.mail;
-    return send(res, 200, { ...rest, hasPassword: !!pass });
+    const { pass, apiKey, ...rest } = db.mail;
+    return send(res, 200, { ...rest, hasPassword: !!pass, hasApiKey: !!apiKey });
   }
   if (route === "POST /api/mail-settings/test") {
     if (adminOnly()) return;
     const body = await readBody(req);
     const to = str(body.to, 200).trim();
     if (!EMAIL_RE.test(to)) return fail(res, 400, "Enter a valid email address");
-    if (!db.mail.host || !db.mail.fromEmail) return fail(res, 400, "Fill in the SMTP host and from-email first, then save, before sending a test");
+    if (!mailIsConfigured()) return fail(res, 400, "Fill in the email settings and from-email first, then save, before sending a test");
     if (emailRateLimited(user.username)) return fail(res, 429, "Too many emails sent recently. Try again in a few minutes.");
     const log = addMailLog({ kind: "test", to, by: user.username });
     send(res, 202, { ok: true, queued: true, id: log.id });
-    sendMail({
-      host: db.mail.host, port: db.mail.port, secure: db.mail.secure, insecureTLS: db.mail.insecureTLS,
-      user: db.mail.user, pass: db.mail.pass, fromEmail: db.mail.fromEmail, fromName: db.mail.fromName || db.settings.name,
+    sendConfiguredMail({
       to, subject: `Test email from ${db.settings.name}`,
       html: `<p>This is a test email from your invoice system (${str(db.settings.name, 200)}).</p><p>If you received this, your email settings are working correctly.</p>`,
       text: `This is a test email from your invoice system (${db.settings.name}). If you received this, your email settings are working correctly.`
@@ -655,18 +778,15 @@ async function api(req, res, url) {
     return send(res, 200, { id: e.id, status: e.status, error: e.error, to: e.to, time: e.time });
   }
 
-  // ----- journals (admin) -----
+  // ----- journals (open to staff too) -----
   if (route === "GET /api/journals") {
-    if (adminOnly()) return;
     return send(res, 200, db.journals);
   }
   if (route === "GET /api/accounts") {
-    if (adminOnly()) return;
     const list = db.settings.accounts.length ? db.settings.accounts : DEFAULT_ACCOUNTS;
     return send(res, 200, list);
   }
   if (route === "POST /api/accounts") {
-    if (adminOnly()) return;
     const body = await readBody(req);
     const name = str(body.name, 100).trim();
     if (!name) return fail(res, 400, "Account name is required");
@@ -678,7 +798,6 @@ async function api(req, res, url) {
     return send(res, 201, db.settings.accounts);
   }
   if (route === "POST /api/journals") {
-    if (adminOnly()) return;
     const body = await readBody(req);
     const j = {
       id: uid(),
@@ -713,7 +832,6 @@ async function api(req, res, url) {
   }
   m = /^\/api\/journals\/([\w-]+)$/.exec(url.pathname);
   if (m && req.method === "DELETE") {
-    if (adminOnly()) return;
     const idx = db.journals.findIndex(j => j.id === m[1]);
     if (idx < 0) return fail(res, 404, "Journal not found");
     const [gone] = db.journals.splice(idx, 1);
@@ -740,6 +858,7 @@ const STATIC = {
   "/logo-mark-transparent.png": ["logo-mark-transparent.png", "image/png"],
   "/logo-mark-dark.png": ["logo-mark-dark.png", "image/png"],
   "/logo-new.png": ["logo-new.png", "image/png"],
+  "/favicon.ico": ["logo-mark-transparent.png", "image/png"],
   "/common.js": ["common.js", "text/javascript; charset=utf-8"],
   "/app.js": ["app.js", "text/javascript; charset=utf-8"]
 };
@@ -750,7 +869,7 @@ function serveFile(res, file, type) {
     if (err) return send(res, 404, "Not found");
     // SAMEORIGIN (not DENY): the admin panel embeds the invoice screen in an iframe so staff never
     // leave the admin shell; still blocks any other site from framing us (clickjacking protection).
-    res.writeHead(200, { "Content-Type": type, "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff", "X-Frame-Options": "SAMEORIGIN" });
+    res.writeHead(200, { "Content-Type": type, "Cache-Control": "no-store", ...SECURITY_HEADERS, "X-Frame-Options": "SAMEORIGIN" });
     res.end(data);
   });
 }
@@ -767,7 +886,9 @@ http.createServer(async (req, res) => {
     if (page) {
       const user = getUser(req);
       if (!user) { res.writeHead(302, { Location: "/login.html" }); return res.end(); }
-      if (page[1] === "admin" && user.role !== "admin") { res.writeHead(302, { Location: "/" }); return res.end(); }
+      // Staff can load the admin shell now (Journals, Reports, Company info, etc. are open to them);
+      // Users and Email settings are still gated per-request by adminOnly() on their own API routes,
+      // and admin.html's own JS hides those panes/nav buttons for non-admin users.
       return serveFile(res, page[0], "text/html; charset=utf-8");
     }
     send(res, 404, "Not found");

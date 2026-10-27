@@ -151,13 +151,26 @@ test("rejects an invoice with no student name", async () => {
   assert.equal(r.status, 400);
 });
 
-test("a staff user cannot read mail settings", async () => {
+test("a staff user cannot read mail settings, manage users, or download the backup", async () => {
   const create = await api("POST", "/api/users", { cookie: adminCookie, body: { username: "staffer", password: "StaffPass1", role: "staff" } });
   assert.equal(create.status, 201);
   const login = await api("POST", "/api/login", { body: { username: "staffer", password: "StaffPass1" } });
   assert.equal(login.status, 200);
-  const r = await api("GET", "/api/mail-settings", { cookie: login.cookie });
-  assert.equal(r.status, 403);
+  assert.equal((await api("GET", "/api/mail-settings", { cookie: login.cookie })).status, 403);
+  assert.equal((await api("GET", "/api/users", { cookie: login.cookie })).status, 403);
+  assert.equal((await api("GET", "/api/backup", { cookie: login.cookie })).status, 403);
+});
+
+test("a staff user can use journals, reports, audit log, and company/course settings", async () => {
+  const login = await api("POST", "/api/login", { body: { username: "staffer", password: "StaffPass1" } });
+  assert.equal(login.status, 200);
+  assert.equal((await api("GET", "/api/journals", { cookie: login.cookie })).status, 200);
+  assert.equal((await api("GET", "/api/accounts", { cookie: login.cookie })).status, 200);
+  assert.equal((await api("GET", "/api/reports", { cookie: login.cookie })).status, 200);
+  assert.equal((await api("GET", "/api/audit", { cookie: login.cookie })).status, 200);
+  const settingsResp = await api("PUT", "/api/settings", { cookie: login.cookie, body: { address: "123 Staff-edited Street" } });
+  assert.equal(settingsResp.status, 200);
+  assert.equal(settingsResp.body.address, "123 Staff-edited Street");
 });
 
 test("saves mail settings and never echoes the password back", async () => {
@@ -287,4 +300,83 @@ test("backup import sanitizes and rejects invalid records instead of trusting th
   const imported = list.body.find((i) => i.id === "bogus-1");
   assert.ok(imported);
   assert.ok(imported.customer.name.length <= 200); // oversized name was truncated, not stored raw
+});
+
+test("responses carry baseline security headers", async () => {
+  const res = await fetch(BASE + "/api/me", { headers: { Cookie: adminCookie } });
+  assert.match(res.headers.get("content-security-policy") || "", /default-src 'self'/);
+  assert.equal(res.headers.get("x-content-type-options"), "nosniff");
+  assert.equal(res.headers.get("referrer-policy"), "no-referrer");
+  assert.ok(res.headers.get("strict-transport-security"));
+});
+
+test("audit log records the real client IP from CF-Connecting-IP, not the tunnel's loopback address", async () => {
+  const res = await fetch(BASE + "/api/login", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "CF-Connecting-IP": "203.0.113.42" },
+    body: JSON.stringify({ username: "admin", password: ADMIN_PASSWORD })
+  });
+  assert.equal(res.status, 200);
+  const audit = await api("GET", "/api/audit?limit=5", { cookie: adminCookie });
+  const entry = audit.body.entries.find((e) => e.action === "login.success" && e.user === "admin");
+  assert.equal(entry.ip, "203.0.113.42");
+});
+
+test("locks out repeated wrong-password login attempts from the same IP", async () => {
+  const ip = "198.51.100.7"; // isolated synthetic IP so this doesn't lock out the shared loopback address other tests log in from
+  let sawLimit = false;
+  for (let i = 0; i < 10; i++) {
+    const res = await fetch(BASE + "/api/login", {
+      method: "POST", headers: { "Content-Type": "application/json", "CF-Connecting-IP": ip },
+      body: JSON.stringify({ username: "admin", password: "wrong" })
+    });
+    if (res.status === 429) { sawLimit = true; break; }
+    assert.equal(res.status, 401);
+  }
+  assert.ok(sawLimit, "expected a 429 after 8 wrong attempts from the same IP");
+  // even the correct password is now rejected until the lockout window passes
+  const res = await fetch(BASE + "/api/login", {
+    method: "POST", headers: { "Content-Type": "application/json", "CF-Connecting-IP": ip },
+    body: JSON.stringify({ username: "admin", password: ADMIN_PASSWORD })
+  });
+  assert.equal(res.status, 429);
+});
+
+test("locks out repeated wrong-current-password attempts on the password-change endpoint", async () => {
+  let sawLimit = false;
+  for (let i = 0; i < 10; i++) {
+    const r = await api("POST", "/api/password", { cookie: adminCookie, body: { current: "definitely-wrong", next: "irrelevant1" } });
+    if (r.status === 429) { sawLimit = true; break; }
+    assert.equal(r.status, 400);
+  }
+  assert.ok(sawLimit, "expected a 429 after enough wrong current-password attempts");
+});
+
+test("management can impersonate a user, act as them, then exit back to their own account", async () => {
+  const create = await api("POST", "/api/users", { cookie: adminCookie, body: { username: "accounts@clt.test", password: "AccPass123", role: "staff" } });
+  assert.equal(create.status, 201);
+
+  const staffLogin = await api("POST", "/api/login", { body: { username: "accounts@clt.test", password: "AccPass123" } });
+  const denied = await api("POST", `/api/users/admin/impersonate`, { cookie: staffLogin.cookie });
+  assert.equal(denied.status, 403, "a non-management user must not be able to impersonate anyone");
+
+  const start = await api("POST", `/api/users/${encodeURIComponent("accounts@clt.test")}/impersonate`, { cookie: adminCookie });
+  assert.equal(start.status, 200);
+  assert.equal(start.body.username, "accounts@clt.test");
+
+  const me = await api("GET", "/api/me", { cookie: start.cookie });
+  assert.equal(me.body.username, "accounts@clt.test");
+  assert.equal(me.body.impersonatedBy, "admin");
+
+  const blocked = await api("GET", "/api/mail-settings", { cookie: start.cookie });
+  assert.equal(blocked.status, 403, "impersonated session only has the target user's real permissions");
+
+  const exit = await api("POST", "/api/impersonate/exit", { cookie: start.cookie });
+  assert.equal(exit.status, 200);
+  assert.equal(exit.body.username, "admin");
+  const meAfter = await api("GET", "/api/me", { cookie: exit.cookie });
+  assert.equal(meAfter.body.impersonatedBy, null);
+
+  const staleCheck = await api("GET", "/api/me", { cookie: start.cookie });
+  assert.equal(staleCheck.status, 401, "the impersonation session is invalidated after exiting");
 });

@@ -6,6 +6,7 @@
 <script>try{var t=localStorage.getItem("clt_theme");if(!t)t=matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light";document.documentElement.dataset.theme=t}catch(e){}</script>
 <script>if(new URLSearchParams(location.search).has("embed"))document.documentElement.classList.add("embed");</script>
 <title>CLT FZE Invoices</title>
+<link rel="icon" type="image/png" href="/logo-mark-transparent.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Open+Sans:wght@300;400;600;700&family=Poppins:ital,wght@0,400;0,500;0,600;0,700;1,700;1,800&display=swap" rel="stylesheet">
 <style>
@@ -84,6 +85,18 @@
   .row { display: grid; gap: 10px; margin-bottom: 10px; }
   .row.c2 { grid-template-columns: 1fr 1fr; }
   .row.c3 { grid-template-columns: 1fr 1fr 1fr; }
+  /* Looks like one field: the code select and number input share one outer border/focus ring,
+     with only a thin internal divider between them, instead of two separate boxes. */
+  .phone-group {
+    display: flex; border: 1px solid var(--ui-border); border-radius: 10px; background: #fff;
+    overflow: hidden; transition: border-color .2s, box-shadow .2s;
+  }
+  .phone-group select, .phone-group input {
+    border: none !important; border-radius: 0 !important; background: transparent !important; box-shadow: none !important;
+  }
+  .phone-group select { flex: 0 0 100px; width: 100px; border-right: 1px solid var(--ui-border) !important; }
+  .phone-group input { flex: 1; min-width: 0; }
+  .phone-group:focus-within { outline: none; border-color: var(--ui-accent); box-shadow: 0 0 0 3px rgba(32, 56, 104, .15); }
 
   .item-card, .pay-card {
     border: 1px solid var(--ui-border); border-radius: 8px; padding: 10px; margin-bottom: 10px; background: #fafbfc;
@@ -146,22 +159,37 @@
   /* ---------- Sidebar (floating icon rail) ---------- */
   .shell { min-height: 100vh; }
   .side { position: fixed; z-index: 20; left: 14px; top: 14px; bottom: 14px; width: 66px; background: #fff;
-    border: 1px solid var(--ui-border); border-radius: 26px; box-shadow: 0 10px 30px rgba(17,24,39,.10); padding: 12px 0; display: flex; flex-direction: column; align-items: center; }
-  .side .mark { width: 42px; height: 42px; border-radius: 12px; display: grid; place-items: center; margin-bottom: 14px; }
+    border: 1px solid var(--ui-border); border-radius: 26px; box-shadow: 0 10px 30px rgba(17,24,39,.10); padding: 12px 0; display: flex; flex-direction: column; align-items: center;
+    overflow: hidden; transition: width .22s cubic-bezier(.22,.61,.36,1), box-shadow .22s ease; }
+  .side:hover, .side:focus-within { width: 240px; align-items: stretch; box-shadow: 0 20px 48px rgba(17,24,39,.18); overflow-y: auto; overflow-x: hidden; }
+  .side .mark { width: 42px; height: 42px; border-radius: 12px; display: grid; place-items: center; margin-bottom: 14px; flex: none; align-self: center; }
   .side .mark img { width: 38px; height: 38px; }
   .nav { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 2px 0; }
-  .rail-btn { position: relative; width: 44px; height: 44px; flex: none; border: 0; background: none; border-radius: 14px; color: #374151; cursor: pointer; display: grid; place-items: center; transition: background .15s, color .15s; font-family: inherit; }
-  .rail-btn .ic { width: 20px; height: 20px; }
+  .side:hover .nav, .side:focus-within .nav { align-items: stretch; }
+  .rail-btn { position: relative; width: 44px; height: 44px; flex: none; border: 0; background: none; border-radius: 14px; color: #374151; cursor: pointer;
+    display: flex; align-items: center; justify-content: center; overflow: hidden; white-space: nowrap; font-family: inherit;
+    transition: background .15s, color .15s, width .22s cubic-bezier(.22,.61,.36,1), justify-content .22s, padding .22s; }
+  .rail-btn .ic { width: 20px; height: 20px; flex: none; }
   .rail-btn:hover { background: #f1f3f6; color: var(--ui-text); }
   .rail-btn.active { background: var(--ui-accent); color: #fff; box-shadow: 0 4px 12px rgba(32,56,104,.30); }
-  .rail-btn::after { content: attr(data-label); position: absolute; left: calc(100% + 14px); top: 50%; transform: translateY(-50%) translateX(-4px);
-    background: #111827; color: #fff; font-size: 12px; font-weight: 500; white-space: nowrap; padding: 6px 10px; border-radius: 8px; opacity: 0; pointer-events: none; transition: opacity .12s, transform .12s; z-index: 99; }
-  .rail-btn:hover::after, .rail-btn:focus-visible::after { opacity: 1; transform: translateY(-50%) translateX(0); }
-  .nav .sep { width: 28px; height: 1px; background: var(--ui-border); margin: 6px 0; flex: none; }
+  .rail-btn::after { content: attr(data-label); font-size: 13px; font-weight: 600; opacity: 0; max-width: 0; margin-left: 0;
+    overflow: hidden; text-overflow: ellipsis; transition: opacity .15s ease, max-width .22s cubic-bezier(.22,.61,.36,1), margin .22s; }
+  .side:hover .rail-btn, .side:focus-within .rail-btn { width: 100%; justify-content: flex-start; padding: 0 14px; }
+  .side:hover .rail-btn::after, .side:focus-within .rail-btn::after { opacity: 1; max-width: 170px; margin-left: 12px; }
+  .side:hover .avatar.rail-btn, .side:focus-within .avatar.rail-btn { border-radius: 14px; }
+  .nav .sep { width: 28px; height: 1px; background: var(--ui-border); margin: 6px 0; flex: none; transition: width .22s ease, margin .22s ease; }
+  .side:hover .nav .sep, .side:focus-within .nav .sep { width: 100%; margin: 6px 0; }
   .side .bottom { margin-top: auto; padding-top: 10px; display: flex; flex-direction: column; align-items: center; gap: 8px; }
+  .side:hover .bottom, .side:focus-within .bottom { align-items: stretch; }
   .avatar { width: 34px; height: 34px; border-radius: 50%; background: #e8edf6; color: var(--ui-accent); font-weight: 600; font-size: 14px; display: grid; place-items: center; border: 0; cursor: pointer; font-family: inherit; }
   .avatar.rail-btn { width: 36px; height: 36px; border-radius: 50%; background: #e8edf6; color: var(--ui-accent); }
-  @media (max-width: 700px) { .side { left: 8px; top: 8px; bottom: 8px; width: 58px; } .main-area { margin-left: 74px !important; } }
+  /* Sleek thin scrollbar for the rail once it expands and its content overflows */
+  .side { scrollbar-width: thin; scrollbar-color: rgba(0,0,0,.18) transparent; }
+  .side::-webkit-scrollbar { width: 6px; }
+  .side::-webkit-scrollbar-track { background: transparent; }
+  .side::-webkit-scrollbar-thumb { background: rgba(0,0,0,.18); border-radius: 999px; }
+  .side::-webkit-scrollbar-thumb:hover { background: rgba(0,0,0,.3); }
+  @media (max-width: 700px) { .side { left: 8px; top: 8px; bottom: 8px; width: 58px; } .side:hover, .side:focus-within { width: 58px; } .main-area { margin-left: 74px !important; } }
 
   /* ---------- Printable document (A4) ---------- */
   .page {
@@ -278,7 +306,8 @@
   /* ---------- Clean white light theme (screen only; the invoice/receipt preview stays white paper) ---------- */
   @media screen {
     body { background: #f0f3f8 url(background-light.svg) center / cover no-repeat fixed; color: #111827; }
-    .main-area { margin-left: 96px; margin-right: 16px; }
+    .main-area { margin-left: 96px; margin-right: 16px; transition: margin-left .22s cubic-bezier(.22,.61,.36,1); }
+    .side:hover ~ .main-area, .side:focus-within ~ .main-area { margin-left: 270px; }
     .side { background: #fff !important; border: 1px solid #e5e7eb !important; border-radius: 26px !important; box-shadow: 0 1px 6px rgba(0,0,0,.08) !important; }
     .side .mark { background: none; box-shadow: none; }
     .side .mark img { width: 40px; height: 40px; }
@@ -343,6 +372,9 @@
     html[data-theme="dark"] .rail-btn.active { background: #3f73c4; color: #fff; box-shadow: 0 6px 16px rgba(0,0,0,.45); }
     html[data-theme="dark"] .nav .sep { background: rgba(255,255,255,.10); }
     html[data-theme="dark"] .avatar, html[data-theme="dark"] .avatar.rail-btn { background: rgba(80,160,72,.25) !important; color: #9fe39a !important; box-shadow: 0 0 0 2px rgba(255,255,255,.12); }
+    html[data-theme="dark"] .side { scrollbar-color: rgba(255,255,255,.22) transparent; }
+    html[data-theme="dark"] .side::-webkit-scrollbar-thumb { background: rgba(255,255,255,.22); }
+    html[data-theme="dark"] .side::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,.35); }
     html[data-theme="dark"] .topbar, html[data-theme="dark"] .panel, html[data-theme="dark"] .drawer {
       background: linear-gradient(135deg, rgba(24, 40, 78, .72), rgba(10, 20, 44, .58)) !important;
       border-color: rgba(255,255,255,.10) !important;
@@ -364,6 +396,10 @@
       background: rgba(255,255,255,.09) !important; border-color: #6b9be6 !important; box-shadow: 0 0 0 3px rgba(107,155,230,.25) !important;
     }
     html[data-theme="dark"] select option { color: #e6ecf7; background: #14254a; }
+    html[data-theme="dark"] .phone-group { background: rgba(255,255,255,.06) !important; border-color: rgba(255,255,255,.14) !important; }
+    html[data-theme="dark"] .phone-group select, html[data-theme="dark"] .phone-group input { background: transparent !important; border-color: transparent !important; color: #e6ecf7 !important; }
+    html[data-theme="dark"] .phone-group select { border-right-color: rgba(255,255,255,.14) !important; }
+    html[data-theme="dark"] .phone-group:focus-within { border-color: #6b9be6 !important; box-shadow: 0 0 0 3px rgba(107,155,230,.25) !important; }
     html[data-theme="dark"] button, html[data-theme="dark"] .btn { background: rgba(255,255,255,.07); border-color: rgba(255,255,255,.14); color: #e6ecf7; }
     html[data-theme="dark"] button:hover { background: rgba(255,255,255,.14); }
     html[data-theme="dark"] .topbar button { background: transparent; color: #e6ecf7; }
@@ -447,7 +483,12 @@
       <div class="row"><div><label>Name</label><input id="c_name" placeholder="Full name"></div></div>
       <div class="row c2">
         <div><label>Email</label><input id="c_email" type="email" placeholder="name@example.com"></div>
-        <div><label>Phone</label><input id="c_phone" placeholder="+971-5xxxxxxxx"></div>
+        <div><label>Phone</label>
+          <div class="phone-group">
+            <select id="c_phoneCode"></select>
+            <input id="c_phone" placeholder="5xxxxxxxx">
+          </div>
+        </div>
       </div>
     </div>
 

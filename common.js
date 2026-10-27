@@ -77,15 +77,47 @@ const ICON_PATHS = {
   logout: '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/>',
   sheet: '<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M3 15h18M9 3v18"/>',
   eye: '<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
+  eyeOff: '<path d="M9.88 9.88a3 3 0 1 0 4.24 4.24"/><path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68"/><path d="M6.61 6.61A13.526 13.526 0 0 0 2 12s3 7 10 7a9.74 9.74 0 0 0 5.39-1.61"/><line x1="2" y1="2" x2="22" y2="22"/>',
   pie: '<path d="M21.21 15.89A10 10 0 1 1 8 2.83"/><path d="M22 12A10 10 0 0 0 12 2v10z"/>',
   history: '<path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l4 2"/>',
+  edit: '<path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4Z"/>',
   moon: '<path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>',
   sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/>',
   receipt: '<path d="M4 2v20l3-2 3 2 3-2 3 2 3-2 3 2V2l-3 2-3-2-3 2-3-2-3 2z"/><path d="M8 8h8M8 12h8M8 16h5"/>',
-  mail: '<rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/>'
+  mail: '<rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/>',
+  copy: '<rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>'
 };
 const icon = (name) => `<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICON_PATHS[name] || ""}</svg>`;
 document.querySelectorAll("[data-icon]").forEach(el => el.insertAdjacentHTML("afterbegin", icon(el.dataset.icon)));
+
+// Adds a show/hide toggle to every password field on the page, so people can check what they
+// typed before submitting instead of guessing from dots. Renders the icon's own markup rather than
+// going through icon()/the shared ".ic" class, since pages like login.html give ".ic" page-specific
+// positioning (e.g. the lock icon prefix) that would otherwise hijack this one too.
+const pwIconSvg = (name) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="width:16px;height:16px;display:block">${ICON_PATHS[name] || ""}</svg>`;
+document.querySelectorAll('input[type="password"]').forEach((input) => {
+  // The button is inserted as a sibling in the input's own parent (making that parent
+  // position:relative if it isn't already) rather than into a new wrapper — a new positioned
+  // wrapper would itself join the parent's "positioned element" paint layer and, since it'd come
+  // after any existing absolutely-positioned icon (e.g. login.html's lock icon prefix) in DOM
+  // order, would paint over it and hide it.
+  const parent = input.parentNode;
+  if (getComputedStyle(parent).position === "static") parent.style.position = "relative";
+  input.style.paddingRight = "38px";
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.title = btn.ariaLabel = "Show password";
+  btn.style.cssText = "position:absolute;right:4px;top:50%;transform:translateY(-50%);background:none;border:none;" +
+    "cursor:pointer;padding:5px;display:flex;color:var(--ui-muted,#6b7280);line-height:0;";
+  btn.innerHTML = pwIconSvg("eye");
+  btn.addEventListener("click", () => {
+    const show = input.type === "password";
+    input.type = show ? "text" : "password";
+    btn.innerHTML = pwIconSvg(show ? "eyeOff" : "eye");
+    btn.title = btn.ariaLabel = show ? "Hide password" : "Show password";
+  });
+  input.after(btn);
+});
 
 // Light / dark mode. The page sets the theme in <head> before it is drawn; these buttons switch it.
 function currentTheme() { return document.documentElement.dataset.theme === "dark" ? "dark" : "light"; }
@@ -111,6 +143,25 @@ window.addEventListener("storage", (e) => { if (e.key === "clt_theme" && e.newVa
 // Display label for a stored role value. The role is still "admin" in the data/API/permissions —
 // only how it's shown in the UI changes.
 const roleLabel = (r) => r === "admin" ? "Management" : "Staff";
+
+// Fixed banner shown while a Management user is viewing the app as someone else (via Admin > Users
+// > Impersonate), so it's always obvious the session isn't their own and there's a one-click way back.
+function renderImpersonationBanner(me) {
+  const existing = $("impersonationBanner");
+  if (!me || !me.impersonatedBy) { if (existing) existing.remove(); document.body.style.removeProperty("--impersonation-offset"); return; }
+  if (existing) return;
+  const bar = document.createElement("div");
+  bar.id = "impersonationBanner";
+  bar.style.cssText = "position:fixed;top:0;left:0;right:0;z-index:99998;display:flex;align-items:center;" +
+    "justify-content:center;gap:10px;padding:8px 14px;background:#8a6d00;color:#fff;font-size:13px;font-weight:600;";
+  bar.innerHTML = `<span>Viewing as <b>${esc(me.username)}</b> — impersonated by ${esc(me.impersonatedBy)}</span>` +
+    `<button id="exitImpersonation" style="background:#fff;color:#8a6d00;border:none;border-radius:6px;padding:4px 10px;font-weight:700;cursor:pointer">Exit</button>`;
+  document.body.prepend(bar);
+  document.body.style.paddingTop = bar.offsetHeight + "px";
+  $("exitImpersonation").onclick = async () => {
+    try { await api("POST", "/api/impersonate/exit"); location.href = "/admin.html#users"; } catch (e) { toast(e.message); }
+  };
+}
 
 async function logout() {
   try { await api("POST", "/api/logout"); } catch {}

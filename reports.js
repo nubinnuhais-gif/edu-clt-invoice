@@ -117,7 +117,7 @@ function buildReport(invoices, from, to) {
 
   const rows = invs.map(i => {
     const t = invTotals(i);
-    return { number: i.number, date: i.date, student: i.customer?.name || "", email: i.customer?.email || "", phone: i.customer?.phone || "",
+    return { id: i.id, number: i.number, date: i.date, student: i.customer?.name || "", email: i.customer?.email || "", phone: i.customer?.phone || "",
       courses: t.lines.map(l => l.qty !== 1 ? `${l.desc} ×${l.qty}` : l.desc).join(", "), total: t.total, paid: t.paid, balance: t.balance, status: t.status, createdBy: i.createdBy || "", lines: t.lines };
   });
 

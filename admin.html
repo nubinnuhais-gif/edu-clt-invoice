@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <script>try{var t=localStorage.getItem("clt_theme");if(!t)t=matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light";document.documentElement.dataset.theme=t}catch(e){}</script>
 <title>Admin · Invoices</title>
+<link rel="icon" type="image/png" href="/logo-mark-transparent.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
@@ -25,25 +26,40 @@
   .shell { min-height: 100vh; }
   /* Floating icon rail */
   .side { position: fixed; z-index: 20; left: 14px; top: 14px; bottom: 14px; width: 66px; background: #fff;
-    border: 1px solid var(--border); border-radius: 26px; box-shadow: 0 10px 30px rgba(17,24,39,.10); padding: 12px 0; display: flex; flex-direction: column; align-items: center; }
-  .side .mark { width: 42px; height: 42px; border-radius: 12px; display: grid; place-items: center; margin-bottom: 14px; }
+    border: 1px solid var(--border); border-radius: 26px; box-shadow: 0 10px 30px rgba(17,24,39,.10); padding: 12px 0; display: flex; flex-direction: column; align-items: center;
+    overflow: hidden; transition: width .22s cubic-bezier(.22,.61,.36,1), box-shadow .22s ease; }
+  .side:hover, .side:focus-within { width: 240px; align-items: stretch; box-shadow: 0 20px 48px rgba(17,24,39,.18); overflow-y: auto; overflow-x: hidden; }
+  .side .mark { width: 42px; height: 42px; border-radius: 12px; display: grid; place-items: center; margin-bottom: 14px; flex: none; align-self: center; }
   .side .mark img { width: 38px; height: 38px; }
   .nav { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 2px 0; }
-  .rail-btn { position: relative; width: 44px; height: 44px; flex: none; border: 0; background: none; border-radius: 14px; color: #374151; cursor: pointer; display: grid; place-items: center; transition: background .15s, color .15s; }
-  .rail-btn .ic { width: 20px; height: 20px; }
+  .side:hover .nav, .side:focus-within .nav { align-items: stretch; }
+  .rail-btn { position: relative; width: 44px; height: 44px; flex: none; border: 0; background: none; border-radius: 14px; color: #374151; cursor: pointer;
+    display: flex; align-items: center; justify-content: center; overflow: hidden; white-space: nowrap;
+    transition: background .15s, color .15s, width .22s cubic-bezier(.22,.61,.36,1), justify-content .22s, padding .22s; }
+  .rail-btn .ic { width: 20px; height: 20px; flex: none; }
   .rail-btn:hover { background: #f1f3f6; color: var(--text); }
   .rail-btn.active { background: var(--accent); color: #fff; box-shadow: 0 4px 12px rgba(32,56,104,.30); }
-  .rail-btn::after { content: attr(data-label); position: absolute; left: calc(100% + 14px); top: 50%; transform: translateY(-50%) translateX(-4px);
-    background: #111827; color: #fff; font-size: 12px; font-weight: 500; white-space: nowrap; padding: 6px 10px; border-radius: 8px; opacity: 0; pointer-events: none; transition: opacity .12s, transform .12s; }
-  .rail-btn:hover::after, .rail-btn:focus-visible::after { opacity: 1; transform: translateY(-50%) translateX(0); }
-  .nav .sep { width: 28px; height: 1px; background: var(--border); margin: 6px 0; flex: none; }
+  .rail-btn::after { content: attr(data-label); font-size: 13px; font-weight: 600; opacity: 0; max-width: 0; margin-left: 0;
+    overflow: hidden; text-overflow: ellipsis; transition: opacity .15s ease, max-width .22s cubic-bezier(.22,.61,.36,1), margin .22s; }
+  .side:hover .rail-btn, .side:focus-within .rail-btn { width: 100%; justify-content: flex-start; padding: 0 14px; }
+  .side:hover .rail-btn::after, .side:focus-within .rail-btn::after { opacity: 1; max-width: 170px; margin-left: 12px; }
+  .side:hover .avatar.rail-btn, .side:focus-within .avatar.rail-btn { border-radius: 14px; }
+  .nav .sep { width: 28px; height: 1px; background: var(--border); margin: 6px 0; flex: none; transition: width .22s ease, margin .22s ease; }
+  .side:hover .nav .sep, .side:focus-within .nav .sep { width: 100%; margin: 6px 0; }
   .side .bottom { margin-top: auto; padding-top: 10px; display: flex; flex-direction: column; align-items: center; gap: 8px; }
+  .side:hover .bottom, .side:focus-within .bottom { align-items: stretch; }
   .avatar { width: 34px; height: 34px; border-radius: 50%; background: #e8edf6; color: var(--accent); font-weight: 600; font-size: 14px; display: grid; place-items: center; border: 0; cursor: pointer; font-family: inherit; }
   .avatar.rail-btn { width: 36px; height: 36px; border-radius: 50%; background: #e8edf6; color: var(--accent); }
-  @media (max-width: 700px) { .side { left: 8px; top: 8px; bottom: 8px; width: 58px; } main { margin-left: 74px !important; padding: 20px 14px !important; } }
+  .side { scrollbar-width: thin; scrollbar-color: rgba(0,0,0,.18) transparent; }
+  .side::-webkit-scrollbar { width: 6px; }
+  .side::-webkit-scrollbar-track { background: transparent; }
+  .side::-webkit-scrollbar-thumb { background: rgba(0,0,0,.18); border-radius: 999px; }
+  .side::-webkit-scrollbar-thumb:hover { background: rgba(0,0,0,.3); }
+  @media (max-width: 700px) { .side { left: 8px; top: 8px; bottom: 8px; width: 58px; } .side:hover, .side:focus-within { width: 58px; } main { margin-left: 74px !important; padding: 20px 14px !important; } }
 
   /* Content */
-  main { margin-left: 96px; padding: 28px 30px; margin-right: 16px; }
+  main { margin-left: 96px; padding: 28px 30px; margin-right: 16px; transition: margin-left .22s cubic-bezier(.22,.61,.36,1); }
+  .side:hover ~ main, .side:focus-within ~ main { margin-left: 270px; }
   main h1 { font-size: 24px; font-weight: 600; margin: 0 0 4px; color: var(--brand); letter-spacing: -.01em; }
   main .lead { color: var(--muted); margin: 0 0 20px; font-size: 13px; }
   .card { background: var(--panel); border: 1px solid var(--border); border-radius: 16px; padding: 20px; margin-bottom: 16px; }
@@ -272,6 +288,9 @@
   html[data-theme="dark"] .nav .sep { background: rgba(255,255,255,.10); }
   html[data-theme="dark"] .avatar, html[data-theme="dark"] .avatar.rail-btn { background: rgba(80,160,72,.25) !important; color: #9fe39a !important; box-shadow: 0 0 0 2px rgba(255,255,255,.12); }
   html[data-theme="dark"] .avatar.rail-btn.active { background: #3f73c4 !important; color: #fff !important; }
+  html[data-theme="dark"] .side { scrollbar-color: rgba(255,255,255,.22) transparent; }
+  html[data-theme="dark"] .side::-webkit-scrollbar-thumb { background: rgba(255,255,255,.22); }
+  html[data-theme="dark"] .side::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,.35); }
   html[data-theme="dark"] .pill { background: rgba(255,255,255,.08); color: #e6ecf7; border-color: rgba(255,255,255,.12); }
   html[data-theme="dark"] .pill.admin { background: rgba(80,160,72,.25); color: #9fe39a; border-color: transparent; }
   html[data-theme="dark"] .numprev { color: #8fb8ff !important; }
@@ -516,7 +535,7 @@
       <h1>Users</h1>
       <p class="lead"><b>Staff</b> can create, edit and print invoices. <b>Management</b> can also change everything on this admin page and delete invoices.</p>
       <div class="card">
-        <table><thead><tr><th>Username</th><th>Role</th><th>Created</th><th style="text-align:right">Actions</th></tr></thead><tbody id="userRows"></tbody></table>
+        <table><thead><tr><th>Username</th><th>Role</th><th>Created</th><th>Password</th><th style="text-align:right">Actions</th></tr></thead><tbody id="userRows"></tbody></table>
       </div>
       <div class="card">
         <h3 style="margin-top:0">Add user</h3>
@@ -637,22 +656,37 @@
     <!-- Email settings -->
     <section data-pane="email">
       <h1>Email settings</h1>
-      <p class="lead">Lets staff send invoices to students by email, using your own SMTP mailbox (Gmail, Office 365, Zoho, cPanel, etc.).</p>
+      <p class="lead">Lets staff send invoices to students by email, either via your own SMTP mailbox or via the Resend API (recommended when the server's SMTP ports are blocked).</p>
       <div class="card">
         <div class="row c2">
-          <div><label>SMTP host</label><input id="m_host" placeholder="smtp.example.com"></div>
-          <div><label>Port</label><input id="m_port" type="number" min="1" max="65535" placeholder="587"></div>
-        </div>
-        <label class="check"><input type="checkbox" id="m_secure"><span>Use SSL/TLS from the start<small>Turn this on for port 465. Leave off for port 587 or 25 (the app will use STARTTLS automatically if the server offers it).</small></span></label>
-        <label class="check"><input type="checkbox" id="m_insecureTLS"><span>Skip certificate verification<small>Only enable this if your mail server uses a self-signed certificate and you trust the network.</small></span></label>
-        <div class="row c2" style="margin-top:14px">
-          <div><label>SMTP username</label><input id="m_user" placeholder="you@example.com"></div>
-          <div><label>SMTP password</label><input id="m_pass" type="password" autocomplete="new-password"></div>
-        </div>
-        <div class="row c2">
-          <div><label>From name</label><input id="m_fromName" placeholder="Consulting, Learning &amp; Training FZE"></div>
+          <div><label>Provider</label>
+            <select id="m_provider">
+              <option value="smtp">SMTP (Gmail, Office 365, Zoho, cPanel, etc.)</option>
+              <option value="resend">Resend API (HTTPS, works even if SMTP ports are blocked)</option>
+            </select>
+          </div>
           <div><label>From email address</label><input id="m_fromEmail" placeholder="billing@example.com"></div>
         </div>
+        <div><label>From name</label><input id="m_fromName" placeholder="Consulting, Learning &amp; Training FZE"></div>
+
+        <div id="m_smtpFields">
+          <div class="row c2" style="margin-top:14px">
+            <div><label>SMTP host</label><input id="m_host" placeholder="smtp.example.com"></div>
+            <div><label>Port</label><input id="m_port" type="number" min="1" max="65535" placeholder="587"></div>
+          </div>
+          <label class="check"><input type="checkbox" id="m_secure"><span>Use SSL/TLS from the start<small>Turn this on for port 465. Leave off for port 587 or 25 (the app will use STARTTLS automatically if the server offers it).</small></span></label>
+          <label class="check"><input type="checkbox" id="m_insecureTLS"><span>Skip certificate verification<small>Only enable this if your mail server uses a self-signed certificate and you trust the network.</small></span></label>
+          <div class="row c2" style="margin-top:14px">
+            <div><label>SMTP username</label><input id="m_user" placeholder="you@example.com"></div>
+            <div><label>SMTP password</label><input id="m_pass" type="password" autocomplete="new-password"></div>
+          </div>
+        </div>
+
+        <div id="m_resendFields" style="margin-top:14px">
+          <label>Resend API key</label><input id="m_apiKey" type="password" autocomplete="new-password" placeholder="re_...">
+          <p class="lead" style="margin-top:6px">The From email's domain must be verified in your Resend account first.</p>
+        </div>
+
         <div class="actions"><button class="btn primary" id="saveMail">Save email settings</button></div>
       </div>
       <div class="card">
@@ -876,6 +910,18 @@
   $("saveTerms").onclick = () => saveSettings({ terms: $("s_terms").value }, "Terms saved");
 
   // ---------- users ----------
+  // Freshly-generated passwords, kept only in memory for this page session — never persisted,
+  // never requested from the server again. Lost on refresh, which is the point.
+  let shownPasswords = {};
+  function pwCell(u) {
+    const rec = shownPasswords[u.username];
+    if (!rec) return `<span class="muted">—</span>`;
+    return `<span style="display:inline-flex;align-items:center;gap:4px;font-family:ui-monospace,Consolas,monospace;white-space:nowrap">
+      <span>${rec.masked ? "••••••••••" : esc(rec.value)}</span>
+      <button type="button" data-maskpw="${esc(u.username)}" title="${rec.masked ? "Show" : "Hide"}" style="background:none;border:none;cursor:pointer;padding:3px;display:flex;color:var(--ui-muted,#6b7280)">${icon(rec.masked ? "eye" : "eyeOff")}</button>
+      <button type="button" data-copypw="${esc(u.username)}" title="Copy" style="background:none;border:none;cursor:pointer;padding:3px;display:flex;color:var(--ui-muted,#6b7280)">${icon("copy")}</button>
+    </span>`;
+  }
   async function loadUsers() {
     try {
       const users = await api("GET", "/api/users");
@@ -883,9 +929,11 @@
         <td><b>${esc(u.username)}</b>${u.username === me.username ? ' <span class="muted">(you)</span>' : ""}</td>
         <td><span class="pill ${u.role}">${roleLabel(u.role)}</span></td>
         <td class="muted">${fmtDate(u.createdAt)}</td>
+        <td>${pwCell(u)}</td>
         <td style="text-align:right;white-space:nowrap">
-          <button class="btn icon" data-reset="${esc(u.username)}">Reset password</button>
+          <button class="btn icon" data-reset="${esc(u.username)}">Show password</button>
           <button class="btn icon" data-role="${esc(u.username)}" data-to="${u.role === "admin" ? "staff" : "admin"}">Make ${u.role === "admin" ? "staff" : "management"}</button>
+          ${u.username === me.username ? "" : `<button class="btn icon" data-impersonate="${esc(u.username)}">Impersonate</button>`}
           ${u.username === me.username ? "" : `<button class="btn icon danger" data-deluser="${esc(u.username)}">Delete</button>`}
         </td></tr>`).join("");
     } catch (e) { toast(e.message); }
@@ -894,14 +942,25 @@
     const d = e.target.dataset;
     try {
       if (d.reset) {
-        const pw = prompt(`New password for ${d.reset} (min 6 characters):`);
-        if (!pw) return;
-        await api("PUT", `/api/users/${encodeURIComponent(d.reset)}`, { password: pw }); toast(`Password changed for ${d.reset}`);
+        const r = await api("PUT", `/api/users/${encodeURIComponent(d.reset)}`, { resetPassword: true });
+        shownPasswords[d.reset] = { value: r.newPassword, masked: false };
+        loadUsers();
+      } else if (d.maskpw) {
+        shownPasswords[d.maskpw].masked = !shownPasswords[d.maskpw].masked;
+        loadUsers();
+      } else if (d.copypw) {
+        try { await navigator.clipboard.writeText(shownPasswords[d.copypw].value); toast("Password copied"); }
+        catch { toast("Couldn't copy — select and copy manually"); }
       } else if (d.role) {
+        if (!confirm(`Change ${d.role} to ${d.to === "admin" ? "Management" : "Staff"}?`)) return;
         await api("PUT", `/api/users/${encodeURIComponent(d.role)}`, { role: d.to }); toast("Role updated"); loadUsers();
       } else if (d.deluser) {
         if (!confirm(`Delete user ${d.deluser}?`)) return;
         await api("DELETE", `/api/users/${encodeURIComponent(d.deluser)}`); toast("User deleted"); loadUsers();
+      } else if (d.impersonate) {
+        if (!confirm(`View the app as ${d.impersonate}? You can switch back at any time from the banner at the top.`)) return;
+        await api("POST", `/api/users/${encodeURIComponent(d.impersonate)}/impersonate`);
+        location.href = "/";
       }
     } catch (ex) { toast(ex.message); }
   });
@@ -931,6 +990,7 @@
     try { mailCfg = await api("GET", "/api/mail-settings"); fillMail(); } catch (e) { toast(e.message); }
   }
   function fillMail() {
+    $("m_provider").value = mailCfg.provider === "resend" ? "resend" : "smtp";
     $("m_host").value = mailCfg.host || "";
     $("m_port").value = mailCfg.port || 587;
     $("m_secure").checked = !!mailCfg.secure;
@@ -938,14 +998,25 @@
     $("m_user").value = mailCfg.user || "";
     $("m_pass").value = "";
     $("m_pass").placeholder = mailCfg.hasPassword ? "•••••• (leave blank to keep)" : "Password";
+    $("m_apiKey").value = "";
+    $("m_apiKey").placeholder = mailCfg.hasApiKey ? "•••••• (leave blank to keep)" : "re_...";
     $("m_fromName").value = mailCfg.fromName || "";
     $("m_fromEmail").value = mailCfg.fromEmail || "";
+    updateMailProviderView();
   }
+  function updateMailProviderView() {
+    const isResend = $("m_provider").value === "resend";
+    $("m_smtpFields").style.display = isResend ? "none" : "";
+    $("m_resendFields").style.display = isResend ? "" : "none";
+  }
+  $("m_provider").addEventListener("change", updateMailProviderView);
   $("saveMail").onclick = async () => {
     try {
       mailCfg = await api("PUT", "/api/mail-settings", {
+        provider: $("m_provider").value,
         host: $("m_host").value, port: $("m_port").value, secure: $("m_secure").checked, insecureTLS: $("m_insecureTLS").checked,
-        user: $("m_user").value, pass: $("m_pass").value, fromName: $("m_fromName").value, fromEmail: $("m_fromEmail").value
+        user: $("m_user").value, pass: $("m_pass").value, apiKey: $("m_apiKey").value,
+        fromName: $("m_fromName").value, fromEmail: $("m_fromEmail").value
       });
       fillMail(); toast("Email settings saved");
     } catch (e) { toast(e.message); }
@@ -1042,11 +1113,29 @@
         rep.byCourse.map(x => `<tr><td>${esc(x.course)}</td><td class="r">${x.qty}</td><td class="r">${fmt(x.amount)}</td></tr>`), "No invoices in this period.");
       $("r_mode").innerHTML = tbl(`<th>Mode</th><th class="r">Payments</th><th class="r">Amount (${c})</th>`,
         rep.byMode.map(x => `<tr><td>${esc(x.mode)}</td><td class="r">${x.count}</td><td class="r">${fmt(x.amount)}</td></tr>`), "No payments in this period.");
-      $("r_invoices").innerHTML = tbl(`<th>Invoice #</th><th>Date</th><th>Student</th><th>Courses</th><th class="r">Total</th><th class="r">Balance</th><th>Status</th>`,
-        rep.invoices.map(r => `<tr><td><b>${esc(r.number)}</b></td><td>${fmtDate(r.date)}</td><td>${esc(r.student)}</td><td>${esc(r.courses)}</td><td class="r">${fmt(r.total)}</td><td class="r">${fmt(r.balance)}</td><td>${esc(r.status)}</td></tr>`),
+      $("r_invoices").innerHTML = tbl(`<th>Invoice #</th><th>Date</th><th>Student</th><th>Courses</th><th class="r">Total</th><th class="r">Balance</th><th>Status</th><th>Actions</th>`,
+        rep.invoices.map(r => `<tr><td><b>${esc(r.number)}</b></td><td>${fmtDate(r.date)}</td><td>${esc(r.student)}</td><td>${esc(r.courses)}</td><td class="r">${fmt(r.total)}</td><td class="r">${fmt(r.balance)}</td><td>${esc(r.status)}</td>
+          <td style="white-space:nowrap">
+            <button type="button" class="btn icon" data-edit="${esc(r.id)}" title="Edit invoice">${icon("edit")}</button>
+            <button type="button" class="btn icon" data-viewpdf="${esc(r.id)}" title="View PDF">${icon("eye")}</button>
+            <button type="button" class="btn icon" data-dlpdf="${esc(r.id)}" title="Download PDF">${icon("download")}</button>
+            ${me.role === "admin" ? `<button type="button" class="btn icon danger" data-del="${esc(r.id)}" data-num="${esc(r.number)}" data-student="${esc(r.student)}" title="Delete invoice">✕</button>` : ""}
+          </td></tr>`),
         "No invoices in this period.");
     } catch (e) { toast(e.message); }
   }
+  $("r_invoices").addEventListener("click", async (e) => {
+    const d = e.target.closest("[data-edit],[data-viewpdf],[data-dlpdf],[data-del]")?.dataset;
+    if (!d) return;
+    if (d.edit) window.open(`/?id=${encodeURIComponent(d.edit)}`, "_blank");
+    else if (d.viewpdf) window.open(`/api/invoices/${encodeURIComponent(d.viewpdf)}/pdf`, "_blank");
+    else if (d.dlpdf) location.href = `/api/invoices/${encodeURIComponent(d.dlpdf)}/pdf?dl=1`;
+    else if (d.del) {
+      if (!confirm(`Delete ${d.num} (${d.student})? This cannot be undone.`)) return;
+      try { await api("DELETE", `/api/invoices/${encodeURIComponent(d.del)}`); toast(`${d.num} deleted`); loadReport(); }
+      catch (ex) { toast(ex.message); }
+    }
+  });
   ["r_preset", "r_month", "r_year", "r_from", "r_to"].forEach(id => $(id).addEventListener("change", loadReport));
   $("r_pdf").onclick = () => { const [from, to] = reportRange(); window.open(`/report?type=sales&from=${from}&to=${to}`, "_blank"); };
   $("r_xlsx").onclick = () => { const [from, to] = reportRange(); location.href = `/api/reports/export?from=${from}&to=${to}`; };
@@ -1216,12 +1305,21 @@
 
   // ---------- start ----------
   me = await api("GET", "/api/me");
+  renderImpersonationBanner(me);
   $("who").textContent = me.username.charAt(0).toUpperCase();
-  $("who").dataset.label = `${me.username} (management) · My password`;
+  $("who").dataset.label = `${me.username} (${roleLabel(me.role).toLowerCase()}) · My password`;
+  // Users, Email settings and Backup stay Management-only — everything else here (Journals,
+  // Reports, Audit log, Courses, Company info, Invoice numbers, Pricing/VAT, Terms) is open to
+  // Staff too, matching what the API now allows for those routes.
+  const STAFF_RESTRICTED_PANES = ["users", "email", "backup"];
+  if (me.role !== "admin") {
+    STAFF_RESTRICTED_PANES.forEach(name => { const b = document.querySelector(`[data-go="${name}"]`); if (b) b.style.display = "none"; });
+  }
   settings = await api("GET", "/api/settings");
   fill();
   let start = "dashboard";
   if (location.hash.length > 1) { start = location.hash.slice(1); history.replaceState(null, "", location.pathname); }
+  if (me.role !== "admin" && STAFF_RESTRICTED_PANES.includes(start)) start = "dashboard";
   go(start);
 })();
 </script>
