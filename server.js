@@ -542,7 +542,7 @@ async function api(req, res, url) {
     return;
   }
 
-  // ----- reports & audit log (open to staff too; Users and Email settings stay Management-only) -----
+  // ----- reports (open to staff too) & audit log (Management-only) -----
   if (route === "GET /api/reports" || route === "GET /api/reports/export") {
     const { from, to } = R.parseRange(url.searchParams);
     const rep = R.buildReport(db.invoices, from, to);
@@ -553,6 +553,7 @@ async function api(req, res, url) {
       "Content-Disposition": `attachment; filename="sales-report_${from}_to_${to}.xlsx"` });
   }
   if (route === "GET /api/audit" || route === "GET /api/audit/export") {
+    if (adminOnly()) return;
     const list = R.filterAudit(audit, url.searchParams);
     if (route === "GET /api/audit") {
       const limit = Math.min(5000, Math.max(1, Math.trunc(num(url.searchParams.get("limit"))) || 200));

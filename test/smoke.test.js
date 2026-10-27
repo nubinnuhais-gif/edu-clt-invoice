@@ -151,7 +151,7 @@ test("rejects an invoice with no student name", async () => {
   assert.equal(r.status, 400);
 });
 
-test("a staff user cannot read mail settings, manage users, or download the backup", async () => {
+test("a staff user cannot read mail settings, manage users, download the backup, or read the audit log", async () => {
   const create = await api("POST", "/api/users", { cookie: adminCookie, body: { username: "staffer", password: "StaffPass1", role: "staff" } });
   assert.equal(create.status, 201);
   const login = await api("POST", "/api/login", { body: { username: "staffer", password: "StaffPass1" } });
@@ -159,15 +159,16 @@ test("a staff user cannot read mail settings, manage users, or download the back
   assert.equal((await api("GET", "/api/mail-settings", { cookie: login.cookie })).status, 403);
   assert.equal((await api("GET", "/api/users", { cookie: login.cookie })).status, 403);
   assert.equal((await api("GET", "/api/backup", { cookie: login.cookie })).status, 403);
+  assert.equal((await api("GET", "/api/audit", { cookie: login.cookie })).status, 403);
+  assert.equal((await api("GET", "/api/audit/export", { cookie: login.cookie })).status, 403);
 });
 
-test("a staff user can use journals, reports, audit log, and company/course settings", async () => {
+test("a staff user can use journals, reports, and company/course settings", async () => {
   const login = await api("POST", "/api/login", { body: { username: "staffer", password: "StaffPass1" } });
   assert.equal(login.status, 200);
   assert.equal((await api("GET", "/api/journals", { cookie: login.cookie })).status, 200);
   assert.equal((await api("GET", "/api/accounts", { cookie: login.cookie })).status, 200);
   assert.equal((await api("GET", "/api/reports", { cookie: login.cookie })).status, 200);
-  assert.equal((await api("GET", "/api/audit", { cookie: login.cookie })).status, 200);
   const settingsResp = await api("PUT", "/api/settings", { cookie: login.cookie, body: { address: "123 Staff-edited Street" } });
   assert.equal(settingsResp.status, 200);
   assert.equal(settingsResp.body.address, "123 Staff-edited Street");

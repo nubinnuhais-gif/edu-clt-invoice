@@ -1308,10 +1308,10 @@
   renderImpersonationBanner(me);
   $("who").textContent = me.username.charAt(0).toUpperCase();
   $("who").dataset.label = `${me.username} (${roleLabel(me.role).toLowerCase()}) · My password`;
-  // Users, Email settings and Backup stay Management-only — everything else here (Journals,
-  // Reports, Audit log, Courses, Company info, Invoice numbers, Pricing/VAT, Terms) is open to
-  // Staff too, matching what the API now allows for those routes.
-  const STAFF_RESTRICTED_PANES = ["users", "email", "backup"];
+  // Users, Email settings, Backup, and the Audit log stay Management-only — everything else here
+  // (Journals, Reports, Courses, Company info, Invoice numbers, Pricing/VAT, Terms) is open to
+  // Staff too, matching what the API allows for those routes.
+  const STAFF_RESTRICTED_PANES = ["users", "email", "backup", "audit"];
   if (me.role !== "admin") {
     STAFF_RESTRICTED_PANES.forEach(name => { const b = document.querySelector(`[data-go="${name}"]`); if (b) b.style.display = "none"; });
   }
