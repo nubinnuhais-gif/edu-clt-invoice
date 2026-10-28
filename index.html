@@ -145,6 +145,14 @@
   }
   .hist-item small { color: var(--ui-muted); }
   .hist-actions { display: flex; gap: 6px; }
+  /* Activity timeline: a vertical connector line with a dot per event, Zoho-comments style */
+  .activity-item { position: relative; padding: 0 0 18px 26px; }
+  .activity-item::before { content: ""; position: absolute; left: 5px; top: 4px; bottom: -4px; width: 1px; background: var(--ui-border); }
+  .activity-item:last-child::before { display: none; }
+  .activity-item::after { content: ""; position: absolute; left: 1px; top: 3px; width: 9px; height: 9px; border-radius: 50%; background: var(--ui-accent); border: 2px solid var(--ui-panel); }
+  .activity-item .a-label { font-size: 13px; font-weight: 600; }
+  .activity-item .a-meta { font-size: 11px; color: var(--ui-muted); margin: 2px 0 4px; }
+  .activity-item .a-details { font-size: 12px; color: var(--ui-muted); white-space: pre-wrap; }
   .badge { font-size: 11px; padding: 1px 7px; border-radius: 10px; font-weight: 600; }
   .badge.paid { background: #e3f3da; color: #3d7a1d; }
   .badge.partial { background: #fff1d6; color: #9a6400; }
@@ -451,6 +459,7 @@
       <button id="btnSave" class="primary" data-icon="save">Save</button>
       <button id="btnPrint" data-icon="printer">Print / PDF</button>
       <button id="btnEmail" data-icon="mail">Email invoice</button>
+      <button id="btnActivity" data-icon="history">Activity</button>
       <button id="btnHistory" data-icon="list">Saved</button>
     </div>
 
@@ -529,6 +538,14 @@
     <h2>Saved invoices <button class="icon" data-close>✕</button></h2>
     <input class="hist-search" id="histSearch" placeholder="Search by name, invoice #, email…">
     <div id="histList"></div>
+  </div>
+</div>
+
+<!-- Invoice activity timeline -->
+<div class="overlay" id="activityOverlay">
+  <div class="drawer">
+    <h2>Activity <button class="icon" data-close>✕</button></h2>
+    <div id="activityList"></div>
   </div>
 </div>
 

@@ -714,7 +714,7 @@
         <h3 style="margin-top:0">Recent email activity</h3>
         <p class="lead" style="margin-bottom:10px">Every invoice email and test email, with its delivery status. Updates automatically while anything is pending.</p>
         <div class="actions" style="margin-top:0;margin-bottom:10px"><button class="btn" id="refreshMailLog">Refresh</button></div>
-        <table><thead><tr><th style="width:150px">Time</th><th>To</th><th>Type</th><th style="width:100px">Status</th><th>Details</th></tr></thead><tbody id="mailLogRows"></tbody></table>
+        <table><thead><tr><th style="width:150px">Time</th><th>To</th><th>Type</th><th style="width:100px">Status</th><th style="width:150px">Opened</th><th>Details</th></tr></thead><tbody id="mailLogRows"></tbody></table>
       </div>
     </section>
 
@@ -1081,14 +1081,18 @@
       $("mailLogRows").innerHTML = log.length ? log.map(e => {
         const type = e.kind === "invoice" ? `Invoice ${esc(e.invoiceNumber || "")}` : "Test email";
         const label = e.status === "sent" ? "Sent" : e.status === "failed" ? "Failed" : "Pending";
+        const opened = e.openedAt
+          ? `<span class="mailstat sent">Opened</span><div class="muted" style="font-size:11px;margin-top:2px">${esc(new Date(e.openedAt).toLocaleString())}${e.openCount > 1 ? ` (${e.openCount}×)` : ""}</div>`
+          : (e.kind === "invoice" && e.status === "sent" ? `<span class="muted">Not yet</span>` : "");
         return `<tr>
           <td style="white-space:nowrap">${esc(new Date(e.time).toLocaleString())}</td>
           <td>${esc(e.to)}</td>
           <td>${type}</td>
           <td><span class="mailstat ${e.status}">${label}</span></td>
+          <td>${opened}</td>
           <td class="muted" style="font-size:12px">${esc(e.error || "")}</td>
         </tr>`;
-      }).join("") : `<tr><td colspan="5" class="muted">No emails sent yet.</td></tr>`;
+      }).join("") : `<tr><td colspan="6" class="muted">No emails sent yet.</td></tr>`;
       if (log.some(e => e.status === "pending")) { if (!mailPollTimer) mailPollTimer = setInterval(loadMailLog, 4000); }
       else stopMailPoll();
     } catch (e) { toast(e.message); }

@@ -500,6 +500,26 @@
     finally { $("emailSend").disabled = false; }
   };
 
+  // Per-invoice activity timeline: created/edited/emailed/opened/printed/payments, newest first.
+  function renderActivity(entries) {
+    $("activityList").innerHTML = entries.length ? entries.map(e => `
+      <div class="activity-item">
+        <div class="a-label">${esc(ACTION_LABELS[e.action] || e.action)}</div>
+        <div class="a-meta">${esc(e.time)}${e.user ? ` · ${esc(e.user)}` : ""}</div>
+        ${e.details ? `<div class="a-details">${esc(e.details)}</div>` : ""}
+      </div>`).join("") : `<p style="color:var(--ui-muted)">No activity recorded yet.</p>`;
+  }
+  let ACTION_LABELS = {};
+  $("btnActivity").onclick = async () => {
+    if (!doc.id) { toast("Save the invoice first to see its activity"); return; }
+    try {
+      const r = await api("GET", `/api/invoices/${doc.id}/activity`);
+      ACTION_LABELS = r.labels || {};
+      renderActivity(r.entries);
+    } catch (e) { toast(e.message); return; }
+    $("activityOverlay").classList.add("open");
+  };
+
   document.querySelectorAll(".overlay").forEach(o => o.addEventListener("click", e => {
     if (e.target === o || e.target.hasAttribute("data-close")) o.classList.remove("open");
   }));

@@ -9,6 +9,7 @@
     "test": "node --test"
   },
   "dependencies": {
+    "pg": "^8.23.1",
     "puppeteer": "^25.16.0"
   }
 }

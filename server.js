@@ -9,14 +9,17 @@ const R = require("./reports");
 const { sendMail, sendMailHttp } = require("./mailer");
 const { sendTelegramDocument } = require("./telegram");
 const { renderPdfFromUrl } = require("./pdf");
+const { createStore } = require("./store");
 
 const PORT = process.env.PORT || 8080;
 const HOST = process.env.HOST || "127.0.0.1";
+const PUBLIC_URL = process.env.PUBLIC_URL || "https://invoice.consultinglearningtraining.net";
+const TRACKING_PIXEL = Buffer.from("R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==", "base64"); // 1x1 transparent gif
 const ROOT = __dirname;
 const DATA_DIR = process.env.DATA_DIR || path.join(ROOT, "data");
-const DB_FILE = path.join(DATA_DIR, "db.json");
-const BACKUP_DIR = path.join(DATA_DIR, "backups");
-const AUDIT_FILE = path.join(DATA_DIR, "audit.log"); // append-only, one JSON entry per line
+const DATABASE_URL = process.env.DATABASE_URL;
+if (!DATABASE_URL) { console.error("DATABASE_URL is not set (e.g. postgres://user:pass@127.0.0.1:5432/clt_invoice)"); process.exit(1); }
+const store = createStore(DATABASE_URL);
 const SESSION_HOURS = 12;
 const MAX_BODY = 6 * 1024 * 1024; // logo uploads are sent as data URLs
 
@@ -89,10 +92,12 @@ function clientIp(req) {
   return (req.socket.remoteAddress || "").replace(/^::ffff:/, "");
 }
 
-function loadDb() {
-  fs.mkdirSync(BACKUP_DIR, { recursive: true });
-  if (fs.existsSync(DB_FILE)) {
-    db = JSON.parse(fs.readFileSync(DB_FILE, "utf8"));
+async function loadDb() {
+  fs.mkdirSync(DATA_DIR, { recursive: true });
+  await store.init();
+  const stored = await store.load();
+  if (stored) {
+    db = stored;
     db.settings = { ...DEFAULT_SETTINGS, ...db.settings };
     db.invoices = db.invoices || [];
     db.journals = db.journals || [];
@@ -110,7 +115,7 @@ function loadDb() {
   if (!db.users.length) {
     const password = process.env.ADMIN_PASSWORD || makePassword();
     db.users.push({ username: "admin", role: "admin", ...hashPassword(password), createdAt: new Date().toISOString() });
-    saveDb();
+    await saveDb();
     const note = `Admin login created\n  Username: admin\n  Password: ${password}\nChange it after first login (Admin > My password).\n`;
     fs.writeFileSync(path.join(DATA_DIR, "FIRST-LOGIN.txt"), note);
     console.log("\n" + note);
@@ -118,30 +123,22 @@ function loadDb() {
 }
 
 // ---------------------------------------------------------------------------
-// Audit log (append-only file; the app has no way to edit or delete entries)
+// Audit log (append-only table; the app has no way to edit or delete entries)
 // ---------------------------------------------------------------------------
 let audit = [];
-function loadAudit() {
-  if (!fs.existsSync(AUDIT_FILE)) return;
-  audit = fs.readFileSync(AUDIT_FILE, "utf8").split("\n").filter(Boolean)
-    .map(l => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
-}
+async function loadAudit() { audit = await store.loadAudit(); }
 function logAudit(req, who, action, target = "", details = "") {
   const e = { time: R.localStamp(), user: who?.username || "", role: who?.role || "", action,
     target: String(target).slice(0, 200), details: (Array.isArray(details) ? details.join("; ") : String(details)).slice(0, 4000),
     ip: req ? clientIp(req) : "" };
   audit.push(e);
-  fs.appendFileSync(AUDIT_FILE, JSON.stringify(e) + "\n");
+  store.appendAudit(e);
 }
 
-function saveDb() {
-  const tmp = DB_FILE + ".tmp";
-  fs.writeFileSync(tmp, JSON.stringify(db, null, 2));
-  fs.renameSync(tmp, DB_FILE);
-  // one backup copy per day
-  const daily = path.join(BACKUP_DIR, `db-${new Date().toISOString().slice(0, 10)}.json`);
-  if (!fs.existsSync(daily)) fs.copyFileSync(DB_FILE, daily);
-}
+// Request handlers await saveDb() so a change is committed to Postgres before it is acknowledged.
+// saveDbSoon() is for background bookkeeping (mail log, Telegram status) where a failed write is only logged.
+const saveDb = () => store.save(db);
+const saveDbSoon = () => { saveDb().catch(e => console.error("Database write failed:", e.message)); };
 
 // ---------------------------------------------------------------------------
 // Sessions & login throttling
@@ -211,13 +208,28 @@ function addMailLog(entry) {
   const e = { id: uid(), time: new Date().toISOString(), status: "pending", ...entry };
   db.mailLog.unshift(e);
   if (db.mailLog.length > 300) db.mailLog.length = 300;
-  saveDb();
+  saveDbSoon();
   return e;
 }
 function updateMailLog(id, patch) {
   const e = db.mailLog.find(x => x.id === id);
-  if (e) { Object.assign(e, patch, { finishedAt: new Date().toISOString() }); saveDb(); }
+  if (e) { Object.assign(e, patch, { finishedAt: new Date().toISOString() }); saveDbSoon(); }
   return e;
+}
+// Called (unauthenticated) when the tracking pixel in a sent invoice email loads, i.e. the
+// customer's mail client rendered the message. Not reliable for clients that block remote images.
+function markMailOpened(id) {
+  const e = db.mailLog.find(x => x.id === id);
+  if (!e) return;
+  const now = new Date().toISOString();
+  const firstOpen = !e.openedAt;
+  if (firstOpen) e.openedAt = now;
+  e.lastOpenedAt = now;
+  e.openCount = (e.openCount || 0) + 1;
+  saveDbSoon();
+  if (firstOpen && e.kind === "invoice" && e.invoiceNumber) {
+    logAudit(null, { username: "system", role: "" }, "invoice.opened", e.invoiceNumber, `Opened by ${e.to}`);
+  }
 }
 // Dispatches to whichever provider is configured (raw SMTP, or Resend's HTTPS API for hosts
 // where outbound SMTP ports are firewalled). fromEmail/fromName/auth are pulled from db.mail.
@@ -370,10 +382,10 @@ async function sendTelegramBackupNow(who) {
       botToken: db.telegram.botToken, chatId: db.telegram.chatId, filename, content: payload,
       caption: `${db.settings.name} — ${db.invoices.length} invoice(s) — ${R.localStamp()}`
     });
-    db.telegram.lastSentAt = new Date().toISOString(); db.telegram.lastStatus = "sent"; saveDb();
+    db.telegram.lastSentAt = new Date().toISOString(); db.telegram.lastStatus = "sent"; saveDbSoon();
     logAudit(null, who || { username: "system", role: "" }, "backup.telegram", "", `Sent to Telegram (${db.invoices.length} invoices)`);
   } catch (e) {
-    db.telegram.lastStatus = `failed: ${e.message}`; saveDb();
+    db.telegram.lastStatus = `failed: ${e.message}`; saveDbSoon();
     logAudit(null, who || { username: "system", role: "" }, "backup.telegram", "", `Failed: ${e.message}`);
     throw e;
   }
@@ -420,6 +432,15 @@ async function api(req, res, url) {
     return send(res, 200, publicUser(user), { "Set-Cookie": sessionCookie(req, token, SESSION_HOURS * 3600) });
   }
 
+  // Invoice email open-tracking pixel: loaded unauthenticated by the customer's mail client, so it
+  // must sit before the login check. Always responds with the same 1x1 gif, even for unknown ids.
+  const pixelMatch = /^\/api\/mail-log\/([\w-]+)\/open\.gif$/.exec(url.pathname);
+  if (pixelMatch && req.method === "GET") {
+    markMailOpened(pixelMatch[1]);
+    res.writeHead(200, { ...SECURITY_HEADERS, "Content-Type": "image/gif", "Cache-Control": "no-store" });
+    return res.end(TRACKING_PIXEL);
+  }
+
   const user = getUser(req);
   if (!user) return fail(res, 401, "Please log in");
   const isAdmin = user.role === "admin";
@@ -448,7 +469,7 @@ async function api(req, res, url) {
       else if (type === "courses") db.settings[k] = cleanCourses(v);
     }
     db.settings.invDigits = Math.min(db.settings.invDigits, 12);
-    saveDb();
+    await saveDb();
     const changes = R.settingsChanges(before, db.settings);
     if (changes.length) logAudit(req, user, "settings.update", "", changes);
     return send(res, 200, publicSettings());
@@ -465,7 +486,7 @@ async function api(req, res, url) {
     Object.assign(inv, { id: uid(), number: invNo(db.settings.nextInvoice++), createdAt: now, updatedAt: now, createdBy: user.username });
     assignReceiptNumbers(inv);
     db.invoices.unshift(inv);
-    saveDb();
+    await saveDb();
     const t = R.invTotals(inv);
     logAudit(req, user, "invoice.create", inv.number, [`Student: ${inv.customer.name}`, `Courses: ${inv.items.map(i => i.desc).join(", ")}`,
       `Total: ${db.settings.currency} ${t.total}`, ...inv.payments.map(p => `Payment: receipt #${p.no}, ${db.settings.currency} ${p.amount} (${p.mode})`)]);
@@ -478,7 +499,7 @@ async function api(req, res, url) {
     if (idx < 0) return fail(res, 404, "Invoice not found");
     if (req.method === "DELETE") {
       if (adminOnly()) return;
-      const [gone] = db.invoices.splice(idx, 1); saveDb();
+      const [gone] = db.invoices.splice(idx, 1); await saveDb();
       const t = R.invTotals(gone);
       logAudit(req, user, "invoice.delete", gone.number, [`Student: ${gone.customer.name}`, `Date: ${gone.date}`,
         `Total: ${db.settings.currency} ${t.total}`, `Paid: ${db.settings.currency} ${t.paid}`, `Created by: ${gone.createdBy || "—"}`]);
@@ -493,7 +514,7 @@ async function api(req, res, url) {
     const oldNos = new Set(old.payments.map(p => p.no));
     inv.payments.forEach(p => { if (p.no && !oldNos.has(p.no)) p.no = null; });
     assignReceiptNumbers(inv);
-    db.invoices[idx] = inv; saveDb();
+    db.invoices[idx] = inv; await saveDb();
     const changes = R.invoiceChanges(old, inv, db.settings.currency);
     if (changes.length) logAudit(req, user, "invoice.update", inv.number, changes);
     return send(res, 200, { invoice: inv, settings: publicSettings() });
@@ -530,6 +551,17 @@ async function api(req, res, url) {
     }
   }
 
+  // Per-invoice activity timeline (created/edited/emailed/opened/printed/payments), newest first —
+  // open to any signed-in user, same as viewing the invoice itself.
+  m = /^\/api\/invoices\/([\w-]+)\/activity$/.exec(url.pathname);
+  if (m && req.method === "GET") {
+    const inv = db.invoices.find(i => i.id === m[1]);
+    if (!inv) return fail(res, 404, "Invoice not found");
+    const marker = `Invoice ${inv.number}`;
+    const entries = audit.filter(e => e.target === inv.number || e.details.includes(marker)).slice().reverse();
+    return send(res, 200, { entries, labels: R.ACTION_LABELS });
+  }
+
   // Email the invoice to the customer (any signed-in user; staff may email the invoices they create).
   // Responds immediately with a "pending" log id; the actual SMTP send happens in the background —
   // poll GET /api/mail-log/:id (or check Admin > Email settings) for the final sent/failed status.
@@ -551,9 +583,10 @@ async function api(req, res, url) {
       sessions.set(pdfToken, { username: user.username, expires: Date.now() + 2 * 60 * 1000 });
       try {
         const pdf = await renderPdfFromUrl({ url: `http://127.0.0.1:${PORT}/?id=${inv.id}`, cookieName: "sid", cookieValue: pdfToken });
+        const pixelUrl = `${PUBLIC_URL}/api/mail-log/${log.id}/open.gif`;
         await sendConfiguredMail({
           to, subject: `Invoice ${inv.number} from ${db.settings.name}`,
-          html: R.invoiceEmailHtml(inv, db.settings), text: R.invoiceEmailText(inv, db.settings),
+          html: R.invoiceEmailHtml(inv, db.settings, pixelUrl), text: R.invoiceEmailText(inv, db.settings),
           attachments: [{ filename: `${inv.number}.pdf`, content: pdf, contentType: "application/pdf" }]
         });
         updateMailLog(log.id, { status: "sent" });
@@ -608,7 +641,7 @@ async function api(req, res, url) {
     if (db.users.some(u => u.username.toLowerCase() === username.toLowerCase())) return fail(res, 400, "That username already exists");
     if (str(body.password).length < 6) return fail(res, 400, "Password must be at least 6 characters");
     const u = { username, role: body.role === "admin" ? "admin" : "staff", ...hashPassword(str(body.password)), createdAt: new Date().toISOString() };
-    db.users.push(u); saveDb();
+    db.users.push(u); await saveDb();
     logAudit(req, user, "user.create", u.username, `Role: ${u.role}`);
     return send(res, 201, publicUser(u));
   }
@@ -650,7 +683,7 @@ async function api(req, res, url) {
       if (u.role === "admin" && admins <= 1) return fail(res, 400, "Keep at least one admin");
       db.users = db.users.filter(x => x !== u);
       for (const [t, s] of sessions) if (s.username === u.username) sessions.delete(t);
-      saveDb(); logAudit(req, user, "user.delete", u.username, `Role was: ${u.role}`);
+      await saveDb(); logAudit(req, user, "user.delete", u.username, `Role was: ${u.role}`);
       return send(res, 200, { ok: true });
     }
     const body = await readBody(req);
@@ -671,7 +704,7 @@ async function api(req, res, url) {
       for (const [t, s] of sessions) if (s.username === u.username && t !== user.token) sessions.delete(t);
       changes.push("Password reset");
     }
-    saveDb();
+    await saveDb();
     if (changes.length) logAudit(req, user, "user.update", u.username, changes);
     return send(res, 200, { ...publicUser(u), newPassword });
   }
@@ -691,7 +724,7 @@ async function api(req, res, url) {
     failures.delete(key);
     if (str(body.next).length < 6) return fail(res, 400, "New password must be at least 6 characters");
     Object.assign(u, hashPassword(str(body.next)));
-    saveDb(); logAudit(req, user, "password.change", user.username);
+    await saveDb(); logAudit(req, user, "password.change", user.username);
     return send(res, 200, { ok: true });
   }
 
@@ -719,7 +752,7 @@ async function api(req, res, url) {
     if (str(body.botToken)) db.telegram.botToken = str(body.botToken, 200).trim();
     db.telegram.enabled = !!body.enabled && !!db.telegram.botToken && !!db.telegram.chatId;
     if (body.enabled && !db.telegram.enabled) return fail(res, 400, "Add both a bot token and a chat ID before enabling automatic backups");
-    saveDb();
+    await saveDb();
     const changes = [
       before.enabled !== db.telegram.enabled ? `Automatic backup: ${db.telegram.enabled ? "on" : "off"}` : null,
       before.chatId !== db.telegram.chatId ? `Chat ID: "${before.chatId || "—"}" → "${db.telegram.chatId || "—"}"` : null,
@@ -758,7 +791,7 @@ async function api(req, res, url) {
       for (const k of Object.keys(SETTING_TYPES)) if (k in rest) db.settings[k] = rest[k];
       if (courses) db.settings.courses = cleanCourses(courses);
     }
-    saveDb();
+    await saveDb();
     logAudit(req, user, "backup.import", "", [`Added ${added.length} invoice(s)`, `Skipped ${body.invoices.length - added.length} already present`,
       body.settings && body.restoreSettings ? "Company settings restored" : "Settings not changed", ...added.slice(0, 50).map(i => i.number)]);
     return send(res, 200, { added: added.length, skipped: body.invoices.length - added.length, settings: publicSettings() });
@@ -788,7 +821,7 @@ async function api(req, res, url) {
     if (str(body.apiKey)) db.mail.apiKey = str(body.apiKey, 500);
     db.mail.fromName = str(body.fromName, 200).trim();
     db.mail.fromEmail = fromEmail;
-    saveDb();
+    await saveDb();
     const changes = [
       before.provider !== db.mail.provider ? `Provider: "${before.provider}" → "${db.mail.provider}"` : null,
       before.host !== db.mail.host ? `Host: "${before.host || "—"}" → "${db.mail.host || "—"}"` : null,
@@ -835,7 +868,7 @@ async function api(req, res, url) {
     const e = db.mailLog.find(x => x.id === m[1]);
     if (!e) return fail(res, 404, "Not found");
     if (!isAdmin && (e.kind !== "invoice" || e.by !== user.username)) return fail(res, 403, "Not yours to view");
-    return send(res, 200, { id: e.id, status: e.status, error: e.error, to: e.to, time: e.time });
+    return send(res, 200, { id: e.id, status: e.status, error: e.error, to: e.to, time: e.time, openedAt: e.openedAt, openCount: e.openCount });
   }
 
   // ----- journals (open to staff too) -----
@@ -854,7 +887,7 @@ async function api(req, res, url) {
     if (db.settings.accounts.some(a => a.toLowerCase() === name.toLowerCase())) return fail(res, 400, "Account already exists");
     db.settings.accounts.push(name);
     db.settings.accounts.sort();
-    saveDb();
+    await saveDb();
     return send(res, 201, db.settings.accounts);
   }
   if (route === "POST /api/journals") {
@@ -886,7 +919,7 @@ async function api(req, res, url) {
     const totalCredit = j.rows.reduce((s, r) => s + r.credit, 0);
     if (Math.abs(totalDebit - totalCredit) > 0.01) return fail(res, 400, "Debits and credits must be equal");
     db.journals.unshift(j);
-    saveDb();
+    await saveDb();
     logAudit(req, user, "journal.create", `JRN-${j.number}`, [`Date: ${j.date}`, `Rows: ${j.rows.length}`, `Total: ${db.settings.currency} ${totalDebit.toFixed(2)}`]);
     return send(res, 201, { journal: j });
   }
@@ -895,7 +928,7 @@ async function api(req, res, url) {
     const idx = db.journals.findIndex(j => j.id === m[1]);
     if (idx < 0) return fail(res, 404, "Journal not found");
     const [gone] = db.journals.splice(idx, 1);
-    saveDb();
+    await saveDb();
     logAudit(req, user, "journal.delete", `JRN-${gone.number}`, `Date: ${gone.date}`);
     return send(res, 200, { ok: true });
   }
@@ -934,15 +967,14 @@ function serveFile(res, file, type) {
   });
 }
 
-loadDb();
-loadAudit();
-
 // Automatic Telegram backup: checked every hour, sends only when enabled in Admin > Backup.
-setInterval(() => {
-  if (db.telegram.enabled) sendTelegramBackupNow().catch(() => {});
-}, 60 * 60 * 1000).unref();
+function startTelegramSchedule() {
+  setInterval(() => {
+    if (db.telegram.enabled) sendTelegramBackupNow().catch(() => {});
+  }, 60 * 60 * 1000).unref();
+}
 
-http.createServer(async (req, res) => {
+const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, "http://localhost");
   try {
     if (url.pathname.startsWith("/api/")) return await api(req, res, url);
@@ -959,6 +991,17 @@ http.createServer(async (req, res) => {
     send(res, 404, "Not found");
   } catch (e) {
     console.error(e);
-    if (!res.headersSent) fail(res, e.message === "too large" ? 413 : 400, e.message === "too large" ? "Upload too large" : "Bad request");
+    if (!res.headersSent) {
+      if (e.message === "too large") fail(res, 413, "Upload too large");
+      else if (e.code && /^[0-9A-Z]{5}$/.test(e.code) || /ECONNREFUSED|Connection terminated/.test(e.message)) fail(res, 500, "The database is unavailable right now. Please try again.");
+      else fail(res, 400, "Bad request");
+    }
   }
-}).listen(PORT, HOST, () => console.log(`Invoice app running at http://localhost:${PORT}`));
+});
+
+(async () => {
+  await loadDb();
+  await loadAudit();
+  startTelegramSchedule();
+  server.listen(PORT, HOST, () => console.log(`Invoice app running at http://localhost:${PORT}`));
+})().catch(e => { console.error("Startup failed:", e.message); process.exit(1); });

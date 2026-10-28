@@ -8,6 +8,13 @@ const path = require("node:path");
 const fs = require("node:fs");
 const os = require("node:os");
 const net = require("node:net");
+const { Pool } = require("pg");
+
+// Tests need a PostgreSQL server (default: the docker container from the README). A throwaway
+// database is created for the run and dropped afterwards.
+const PG_ADMIN_URL = process.env.TEST_PG_URL || "postgres://postgres:postgres@127.0.0.1:55432/postgres";
+const TEST_DB = "clt_test_" + Math.random().toString(36).slice(2, 10);
+const TEST_DB_URL = PG_ADMIN_URL.replace(/\/[^/]*$/, "/" + TEST_DB);
 
 const ROOT = path.join(__dirname, "..");
 const PORT = 8411;
@@ -78,11 +85,14 @@ async function api(method, p, { body, cookie } = {}) {
 }
 
 before(async () => {
+  const admin = new Pool({ connectionString: PG_ADMIN_URL });
+  await admin.query(`CREATE DATABASE ${TEST_DB}`);
+  await admin.end();
   const fake = await startFakeSmtp();
   fakeSmtp = fake.server; fakeSmtpPort = fake.port;
   serverProc = spawn(process.execPath, ["server.js"], {
     cwd: ROOT,
-    env: { ...process.env, PORT: String(PORT), HOST: "127.0.0.1", DATA_DIR, ADMIN_PASSWORD },
+    env: { ...process.env, PORT: String(PORT), HOST: "127.0.0.1", DATA_DIR, ADMIN_PASSWORD, DATABASE_URL: TEST_DB_URL },
     stdio: "pipe"
   });
   await waitForServer(BASE + "/login.html");
@@ -92,6 +102,9 @@ after(async () => {
   serverProc?.kill();
   await new Promise((r) => fakeSmtp.close(r));
   fs.rmSync(DATA_DIR, { recursive: true, force: true });
+  const admin = new Pool({ connectionString: PG_ADMIN_URL });
+  await admin.query(`DROP DATABASE IF EXISTS ${TEST_DB} WITH (FORCE)`);
+  await admin.end();
 });
 
 let adminCookie, invoiceId;
@@ -206,6 +219,19 @@ test("emails the invoice with a valid PDF attachment", async () => {
   const b64 = afterHeader.split(/\n--b_/)[0].replace(/\n/g, "");
   const pdf = Buffer.from(b64, "base64");
   assert.equal(pdf.subarray(0, 5).toString("latin1"), "%PDF-");
+
+  const pixel = await api("GET", `/api/mail-log/${send.body.id}/open.gif`);
+  assert.equal(pixel.status, 200);
+  const after = await api("GET", `/api/mail-log/${send.body.id}`, { cookie: adminCookie });
+  assert.ok(after.body.openedAt);
+  assert.equal(after.body.openCount, 1);
+
+  const activity = await api("GET", `/api/invoices/${invoiceId}/activity`, { cookie: adminCookie });
+  assert.equal(activity.status, 200);
+  const actions = activity.body.entries.map((e) => e.action);
+  assert.ok(actions.includes("invoice.email"));
+  assert.ok(actions.includes("invoice.opened"));
+  assert.ok(activity.body.labels["invoice.opened"]);
 });
 
 test("rejects an unbalanced journal entry", async () => {

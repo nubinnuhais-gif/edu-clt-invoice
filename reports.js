@@ -37,7 +37,7 @@ const money = (n) => Number(n || 0).toLocaleString("en-US", { minimumFractionDig
 
 // Short, "see attached" style — the full PDF invoice is attached separately, so this is just
 // a brief, low-noise cover note (also reads less like a typical invoice-phishing template).
-function invoiceEmailHtml(inv, settings) {
+function invoiceEmailHtml(inv, settings, pixelUrl) {
   const t = invTotals(inv);
   const cur = (n) => `${settings.currency} ${money(n)}`;
   const [statusBg, statusFg] = t.status === "Paid" ? ["#e3f3da", "#3d7a1d"] : t.status === "Partially paid" ? ["#fff1d6", "#9a6400"] : ["#fde2e2", "#a12020"];
@@ -72,6 +72,7 @@ function invoiceEmailHtml(inv, settings) {
 </table>
 </td></tr>
 </table>
+${pixelUrl ? `<img src="${htmlEsc(pixelUrl)}" width="1" height="1" alt="" style="display:block;border:0">` : ""}
 </body></html>`;
 }
 
@@ -180,12 +181,13 @@ const ACTION_LABELS = {
   "login.success": "Signed in", "login.failed": "Failed sign-in", "logout": "Signed out",
   "invoice.create": "Created invoice", "invoice.update": "Edited invoice", "invoice.delete": "Deleted invoice",
   "invoice.print": "Printed invoice", "receipt.print": "Printed receipt", "invoice.email": "Emailed invoice",
+  "invoice.opened": "Customer opened the email", "invoice.pdf": "Viewed/downloaded PDF",
   "settings.update": "Changed settings", "mail.settings.update": "Changed email settings", "mail.settings.test": "Sent test email",
   "telegram.settings.update": "Changed Telegram backup settings",
   "user.create": "Added user", "user.update": "Changed user", "user.delete": "Deleted user", "password.change": "Changed own password",
   "backup.download": "Downloaded backup", "backup.import": "Imported backup", "backup.telegram": "Sent backup to Telegram", "report.export": "Downloaded report"
 };
-const ACTION_GROUPS = { login: ["login.success", "login.failed", "logout"], invoice: ["invoice.create", "invoice.update", "invoice.delete", "invoice.print", "receipt.print", "invoice.email"],
+const ACTION_GROUPS = { login: ["login.success", "login.failed", "logout"], invoice: ["invoice.create", "invoice.update", "invoice.delete", "invoice.print", "receipt.print", "invoice.email", "invoice.opened", "invoice.pdf"],
   settings: ["settings.update", "mail.settings.update", "mail.settings.test", "telegram.settings.update"], user: ["user.create", "user.update", "user.delete", "password.change"],
   data: ["backup.download", "backup.import", "backup.telegram", "report.export"] };
 
