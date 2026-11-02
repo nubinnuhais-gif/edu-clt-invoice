@@ -2,14 +2,14 @@
 // Multipart/form-data body built by hand (same approach as mailer.js's MIME builder), no SDK.
 const https = require("https");
 
-function sendTelegramDocument({ botToken, chatId, filename, content, caption, timeout = 20000 }) {
+function sendTelegramDocument({ botToken, chatId, filename, content, caption, contentType = "application/json", timeout = 60000 }) {
   return new Promise((resolve, reject) => {
     const boundary = "----CLTBackup" + Date.now().toString(36) + Math.random().toString(36).slice(2);
     const parts = [
       Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="chat_id"\r\n\r\n${chatId}\r\n`, "utf8")
     ];
     if (caption) parts.push(Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="caption"\r\n\r\n${caption}\r\n`, "utf8"));
-    parts.push(Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="document"; filename="${filename}"\r\nContent-Type: application/json\r\n\r\n`, "utf8"));
+    parts.push(Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="document"; filename="${filename}"\r\nContent-Type: ${contentType}\r\n\r\n`, "utf8"));
     parts.push(Buffer.isBuffer(content) ? content : Buffer.from(content, "utf8"));
     parts.push(Buffer.from(`\r\n--${boundary}--\r\n`, "utf8"));
     const body = Buffer.concat(parts);

@@ -5,7 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <script>try{var t=localStorage.getItem("clt_theme");if(!t)t=matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light";document.documentElement.dataset.theme=t}catch(e){}</script>
 <title>Admin · Invoices</title>
-<link rel="icon" type="image/png" href="/logo-mark-transparent.png">
+<link rel="icon" type="image/png" sizes="132x132" href="/logo-mark-transparent.png">
+<link rel="apple-touch-icon" href="/logo-mark.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
@@ -49,7 +50,16 @@
   .side .bottom { margin-top: auto; padding-top: 10px; display: flex; flex-direction: column; align-items: center; gap: 8px; }
   .side:hover .bottom, .side:focus-within .bottom { align-items: stretch; }
   .avatar { width: 34px; height: 34px; border-radius: 50%; background: #e8edf6; color: var(--accent); font-weight: 600; font-size: 14px; display: grid; place-items: center; border: 0; cursor: pointer; font-family: inherit; }
-  .avatar.rail-btn { width: 36px; height: 36px; border-radius: 50%; background: #e8edf6; color: var(--accent); }
+  .avatar.rail-btn { display: flex; width: 36px; height: 36px; border-radius: 50%; background: #e8edf6; color: var(--accent); }
+  .avatar.rail-btn::after { display: none; }
+  .avatar.rail-btn { padding: 0; gap: 10px; justify-content: center; }
+  .side:hover .avatar.rail-btn, .side:focus-within .avatar.rail-btn { height: 52px; padding: 0 8px; justify-content: flex-start; }
+  .who-i { width: 36px; height: 36px; border-radius: 50%; flex: none; display: grid; place-items: center; font-size: 15px; font-weight: 700; background: var(--accent); color: #fff; }
+  .who-t { display: flex; flex-direction: column; text-align: left; line-height: 1.25; min-width: 0; opacity: 0; max-width: 0; transition: opacity .15s ease, max-width .22s cubic-bezier(.22,.61,.36,1); }
+  .who-t b { font-size: 13px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; }
+  .who-t small { font-size: 11px; font-weight: 500; opacity: .7; }
+  .side:hover .who-t, .side:focus-within .who-t { opacity: 1; max-width: 150px; }
+  .avatar.rail-btn:hover .who-i { box-shadow: 0 0 0 3px rgba(80,160,72,.25); }
   .side { scrollbar-width: thin; scrollbar-color: rgba(0,0,0,.18) transparent; }
   .side::-webkit-scrollbar { width: 6px; }
   .side::-webkit-scrollbar-track { background: transparent; }
@@ -193,8 +203,10 @@
   .rail-btn:hover { background: #f3f4f6; color: #111827; }
   .rail-btn.active { background: var(--accent); color: #fff; box-shadow: 0 2px 8px rgba(32,56,104,.25); }
   .nav .sep { background: #e5e7eb; }
-  .avatar, .avatar.rail-btn { background: #e8edf6 !important; color: var(--accent) !important; }
-  .avatar.rail-btn.active { background: var(--accent) !important; color: #fff !important; }
+  .avatar, .avatar.rail-btn { background: transparent !important; color: var(--text) !important; }
+  .side:hover .avatar.rail-btn, .side:focus-within .avatar.rail-btn { background: #eef2f8 !important; }
+  .avatar.rail-btn.active, .side:hover .avatar.rail-btn.active { background: var(--accent) !important; color: #fff !important; }
+  .avatar.rail-btn.active .who-i { background: #fff; color: var(--accent); }
   .side .mark { background: none; box-shadow: none; }
   .side .mark img { width: 40px; height: 40px; }
   .pill { background: #f3f4f6; color: #374151; border: 1px solid #e5e7eb; }
@@ -286,7 +298,9 @@
   html[data-theme="dark"] .rail-btn:hover { background: rgba(255,255,255,.08); color: #fff; }
   html[data-theme="dark"] .rail-btn.active { background: #3f73c4; color: #fff; box-shadow: 0 6px 16px rgba(0,0,0,.45); }
   html[data-theme="dark"] .nav .sep { background: rgba(255,255,255,.10); }
-  html[data-theme="dark"] .avatar, html[data-theme="dark"] .avatar.rail-btn { background: rgba(80,160,72,.25) !important; color: #9fe39a !important; box-shadow: 0 0 0 2px rgba(255,255,255,.12); }
+  html[data-theme="dark"] .avatar, html[data-theme="dark"] .avatar.rail-btn { background: transparent !important; color: #e5e7eb !important; box-shadow: none; }
+  html[data-theme="dark"] .side:hover .avatar.rail-btn, html[data-theme="dark"] .side:focus-within .avatar.rail-btn { background: rgba(255,255,255,.07) !important; }
+  html[data-theme="dark"] .who-i { background: #50A048; }
   html[data-theme="dark"] .avatar.rail-btn.active { background: #3f73c4 !important; color: #fff !important; }
   html[data-theme="dark"] .side { scrollbar-color: rgba(255,255,255,.22) transparent; }
   html[data-theme="dark"] .side::-webkit-scrollbar-thumb { background: rgba(255,255,255,.22); }
@@ -1352,8 +1366,8 @@
   // ---------- start ----------
   me = await api("GET", "/api/me");
   renderImpersonationBanner(me);
-  $("who").textContent = me.username.charAt(0).toUpperCase();
-  $("who").dataset.label = `${me.username} (${roleLabel(me.role).toLowerCase()}) · My password`;
+  $("who").innerHTML = `<span class="who-i">${esc(me.username.charAt(0).toUpperCase())}</span><span class="who-t"><b>${esc(me.username)}</b><small>${esc(roleLabel(me.role))}</small></span>`;
+  $("who").title = "My password";
   // Users, Email settings, Backup, and the Audit log stay Management-only — everything else here
   // (Journals, Reports, Courses, Company info, Invoice numbers, Pricing/VAT, Terms) is open to
   // Staff too, matching what the API allows for those routes.

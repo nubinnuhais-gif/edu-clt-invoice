@@ -5,6 +5,8 @@ const http = require("http");
 const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
+const zlib = require("zlib");
+const { spawn } = require("child_process");
 const R = require("./reports");
 const { sendMail, sendMailHttp } = require("./mailer");
 const { sendTelegramDocument } = require("./telegram");
@@ -371,15 +373,30 @@ const publicUser = (u) => ({ username: u.username, role: u.role, createdAt: u.cr
 const backupPayload = () => JSON.stringify({ settings: db.settings, invoices: db.invoices, exportedAt: new Date().toISOString() }, null, 2);
 const CHAT_ID_RE = /^-?\d+$|^@[A-Za-z0-9_]{5,32}$/;
 
-// Sends the same backup as "Download backup" to the configured Telegram chat. Used by the hourly
-// scheduler and by the "Send test backup now" button; `who` is only for the audit log (the hourly
-// run has no request/user, so it's logged as "system").
+// Full PostgreSQL dump (gzipped SQL), restorable with: gunzip -c file.sql.gz | psql <database>
+function pgDumpGz() {
+  return new Promise((resolve, reject) => {
+    const dump = spawn("pg_dump", ["--no-owner", "--no-privileges", DATABASE_URL]);
+    const gz = zlib.createGzip(), chunks = [];
+    let err = "";
+    dump.stdout.pipe(gz);
+    gz.on("data", c => chunks.push(c));
+    dump.stderr.on("data", d => { err += d; });
+    dump.on("error", e => reject(new Error(e.code === "ENOENT" ? "pg_dump is not installed on the server" : e.message)));
+    dump.on("close", code => { if (code !== 0) reject(new Error(`pg_dump failed: ${err.trim().slice(0, 200)}`)); });
+    gz.on("end", () => resolve(Buffer.concat(chunks)));
+  });
+}
+
+// Sends a full database dump to the configured Telegram chat. Used by the hourly scheduler and by
+// the "Send test backup now" button; `who` is only for the audit log (the hourly run has no
+// request/user, so it's logged as "system").
 async function sendTelegramBackupNow(who) {
-  const payload = backupPayload();
-  const filename = `invoices-backup-${new Date().toISOString().replace(/[:T]/g, "-").slice(0, 16)}.json`;
+  const filename = `clt-invoice-db-${new Date().toISOString().replace(/[:T]/g, "-").slice(0, 16)}.sql.gz`;
   try {
+    const payload = await pgDumpGz();
     await sendTelegramDocument({
-      botToken: db.telegram.botToken, chatId: db.telegram.chatId, filename, content: payload,
+      botToken: db.telegram.botToken, chatId: db.telegram.chatId, filename, content: payload, contentType: "application/gzip",
       caption: `${db.settings.name} — ${db.invoices.length} invoice(s) — ${R.localStamp()}`
     });
     db.telegram.lastSentAt = new Date().toISOString(); db.telegram.lastStatus = "sent"; saveDbSoon();
@@ -957,13 +974,36 @@ const STATIC = {
 };
 const PAGES = { "/": ["index.html", "staff"], "/index.html": ["index.html", "staff"], "/admin": ["admin.html", "admin"], "/admin.html": ["admin.html", "admin"], "/report": ["report.html", "admin"] };
 
-function serveFile(res, file, type) {
-  fs.readFile(path.join(ROOT, file), (err, data) => {
+// Static files are cached in memory (re-read only when the file's mtime changes) and text types are
+// gzipped once, so repeat page loads cost no disk reads or compression and ~5x fewer bytes on the wire.
+const fileCache = new Map();
+const isCompressible = (type) => type.startsWith("text/") || type.startsWith("image/svg");
+function serveFile(req, res, file, type) {
+  const full = path.join(ROOT, file);
+  fs.stat(full, (err, st) => {
     if (err) return send(res, 404, "Not found");
-    // SAMEORIGIN (not DENY): the admin panel embeds the invoice screen in an iframe so staff never
-    // leave the admin shell; still blocks any other site from framing us (clickjacking protection).
-    res.writeHead(200, { "Content-Type": type, "Cache-Control": "no-store", ...SECURITY_HEADERS, "X-Frame-Options": "SAMEORIGIN" });
-    res.end(data);
+    const respond = (e) => {
+      // SAMEORIGIN (not DENY): the admin panel embeds the invoice screen in an iframe so staff never
+      // leave the admin shell; still blocks any other site from framing us (clickjacking protection).
+      // Images (logo/favicon) must be cacheable: browsers won't store a no-store favicon, so it goes
+      // missing from the address-bar suggestions, history and bookmarks. Pages and scripts stay no-store.
+      const headers = { "Content-Type": type, "Cache-Control": type.startsWith("image/") ? "public, max-age=86400" : "no-store",
+        ...SECURITY_HEADERS, "X-Frame-Options": "SAMEORIGIN", "Vary": "Accept-Encoding" };
+      const gz = e.gz && /gzip/.test(req.headers["accept-encoding"] || "");
+      if (gz) headers["Content-Encoding"] = "gzip";
+      const body = gz ? e.gz : e.raw;
+      headers["Content-Length"] = body.length;
+      res.writeHead(200, headers);
+      res.end(req.method === "HEAD" ? undefined : body);
+    };
+    const hit = fileCache.get(file);
+    if (hit && hit.mtime === st.mtimeMs) return respond(hit);
+    fs.readFile(full, (err2, raw) => {
+      if (err2) return send(res, 404, "Not found");
+      const e = { mtime: st.mtimeMs, raw, gz: isCompressible(type) ? zlib.gzipSync(raw, { level: 6 }) : null };
+      fileCache.set(file, e);
+      respond(e);
+    });
   });
 }
 
@@ -978,7 +1018,7 @@ const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, "http://localhost");
   try {
     if (url.pathname.startsWith("/api/")) return await api(req, res, url);
-    if (STATIC[url.pathname]) return serveFile(res, ...STATIC[url.pathname]);
+    if (STATIC[url.pathname]) return serveFile(req, res, ...STATIC[url.pathname]);
     const page = PAGES[url.pathname];
     if (page) {
       const user = getUser(req);
@@ -986,7 +1026,7 @@ const server = http.createServer(async (req, res) => {
       // Staff can load the admin shell now (Journals, Reports, Company info, etc. are open to them);
       // Users and Email settings are still gated per-request by adminOnly() on their own API routes,
       // and admin.html's own JS hides those panes/nav buttons for non-admin users.
-      return serveFile(res, page[0], "text/html; charset=utf-8");
+      return serveFile(req, res, page[0], "text/html; charset=utf-8");
     }
     send(res, 404, "Not found");
   } catch (e) {
