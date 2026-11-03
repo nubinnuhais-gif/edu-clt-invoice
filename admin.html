@@ -1181,10 +1181,12 @@
             <button type="button" class="btn icon" data-dlpdf="${esc(r.id)}" title="Download PDF">${icon("download")}</button>
             ${me.role === "admin" ? `<button type="button" class="btn icon danger" data-del="${esc(r.id)}" data-num="${esc(r.number)}" data-student="${esc(r.student)}" title="Delete invoice">✕</button>` : ""}
           </td></tr>`),
-        "No invoices in this period.");
+        $("r_preset").value === "all" ? "No invoices yet."
+          : `No invoices in this period. <a href="#" data-allperiods style="color:var(--accent);font-weight:600">Show all time</a> to see older invoices.`);
     } catch (e) { toast(e.message); }
   }
   $("r_invoices").addEventListener("click", async (e) => {
+    if (e.target.closest("[data-allperiods]")) { e.preventDefault(); $("r_preset").value = "all"; loadReport(); return; }
     const d = e.target.closest("[data-edit],[data-viewpdf],[data-dlpdf],[data-del]")?.dataset;
     if (!d) return;
     if (d.edit) window.open(`/?id=${encodeURIComponent(d.edit)}`, "_blank");
