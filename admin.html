@@ -274,6 +274,9 @@
   html[data-theme="dark"] .mailstat.failed { background: rgba(255,100,100,.15) !important; color: #ffb1b1 !important; }
   html[data-theme="dark"] .recent-table tr[data-id]:hover { background: rgba(255,255,255,.05); }
   html[data-theme="dark"] .kpi-label, html[data-theme="dark"] label, html[data-theme="dark"] th { color: #a9b8d3 !important; }
+  .all-time-link { color: var(--accent); font-weight: 600; text-decoration: underline; text-underline-offset: 2px; }
+  .all-time-link:hover { text-decoration-thickness: 2px; }
+  html[data-theme="dark"] .all-time-link { color: #8fb4ff !important; }
   html[data-theme="dark"] .muted, html[data-theme="dark"] .check small { color: #8796b3 !important; }
   html[data-theme="dark"] th { border-bottom-color: rgba(255,255,255,.10) !important; }
   html[data-theme="dark"] td { border-bottom-color: rgba(255,255,255,.06) !important; }
@@ -1182,7 +1185,7 @@
             ${me.role === "admin" ? `<button type="button" class="btn icon danger" data-del="${esc(r.id)}" data-num="${esc(r.number)}" data-student="${esc(r.student)}" title="Delete invoice">✕</button>` : ""}
           </td></tr>`),
         $("r_preset").value === "all" ? "No invoices yet."
-          : `No invoices in this period. <a href="#" data-allperiods style="color:var(--accent);font-weight:600">Show all time</a> to see older invoices.`);
+          : `No invoices in this period. <a href="#" data-allperiods class="all-time-link">Show all time</a> to see older invoices.`);
     } catch (e) { toast(e.message); }
   }
   $("r_invoices").addEventListener("click", async (e) => {
